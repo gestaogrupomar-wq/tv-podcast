@@ -72,10 +72,14 @@ function noAr(t) {
   const seq = s.seq || [];
   let i = seq.findIndex((x) => x[0] === s.item);
   if (i < 0) return { id: s.item, ms: 0 };
+  // TV parada (desligando, em espera): no último aviso ela já estava bem além do fim do item.
+  // Aí não dá para saber o que passa; a prévia roda sozinha.
+  if (seq[i][1] && seq.length > 1 && (s.decorrido || 0) > seq[i][1] + 10000) return null;
   let ms = Date.now() - s.em + (s.decorrido || 0);
   for (let volta = 0; volta < 2000; volta++) {
     const dur = seq[i][1];
-    if (!dur || ms < dur || seq.length === 1) return { id: seq[i][0], ms: seq.length === 1 && dur ? ms % dur : ms };
+    if (!dur) return { id: seq[i][0], ms: 0 }; // duração ainda desconhecida: do início
+    if (ms < dur || seq.length === 1) return { id: seq[i][0], ms: seq.length === 1 ? ms % dur : ms };
     ms -= dur;
     i = (i + 1) % seq.length;
   }
@@ -423,8 +427,12 @@ async function enviar(arquivos) {
 let previaPos = -1, previaTimer = null, relogio = null, inicioItem = 0, previaId = null;
 
 /** TV online: a prévia mostra o mesmo item que a TV, no mesmo ponto. */
+let terminouId = null, terminouEm = 0;
+
 function seguirTv(it, ms) {
   if (previaId === it.id) return;
+  // o item acabou de terminar aqui na prévia: não puxa de volta (era o vaivém do pisca-pisca)
+  if (it.id === terminouId && Date.now() - terminouEm < 3000) return;
   const ativos = playlist.itens.filter((i) => i.ativo);
   previaPos = ativos.findIndex((i) => i.id === it.id) - 1;
   proximaPrevia(ms);
@@ -458,8 +466,9 @@ function proximaPrevia(desde = 0) {
   if (it.tipo === "video") {
     const v = document.createElement("video");
     v.src = it.url; v.muted = true; v.autoplay = true; v.playsInline = true;
-    if (desde) v.addEventListener("loadedmetadata", () => { v.currentTime = Math.min(desde / 1000, Math.max(0, v.duration - 0.5)); }, { once: true });
-    v.onended = () => proximaPrevia();
+    // ponto calculado além do fim do vídeo: começa do início em vez de pular para o fim
+    if (desde) v.addEventListener("loadedmetadata", () => { if (desde / 1000 < v.duration - 1) v.currentTime = desde / 1000; }, { once: true });
+    v.onended = () => { terminouId = it.id; terminouEm = Date.now(); proximaPrevia(); };
     v.onerror = () => { previaTimer = setTimeout(proximaPrevia, 2000); };
     if (ativos.length === 1) v.loop = true;
     tela.replaceChildren(v);
@@ -467,7 +476,8 @@ function proximaPrevia(desde = 0) {
     const img = new Image();
     img.src = it.url; img.alt = "";
     tela.replaceChildren(img);
-    previaTimer = setTimeout(proximaPrevia, Math.max(500, it.duracao * 1000 - desde));
+    previaTimer = setTimeout(() => { terminouId = it.id; terminouEm = Date.now(); proximaPrevia(); },
+      Math.max(1000, it.duracao * 1000 - desde));
   }
 }
 
