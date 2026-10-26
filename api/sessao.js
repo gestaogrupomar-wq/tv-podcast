@@ -7,6 +7,14 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return json(res, 405, {});
 
   if (!process.env.PAINEL_SENHA) return json(res, 500, { erro: "Senha do painel não configurada na Vercel." });
+  try {
+    await entrar(req, res);
+  } catch (e) {
+    json(res, 500, { erro: e.message });
+  }
+};
+
+async function entrar(req, res) {
   // até 10 tentativas erradas por IP a cada 15 min
   const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "?";
   const chave = "podcast:tentativas:" + ip;
@@ -21,4 +29,4 @@ module.exports = async (req, res) => {
   await redis("DEL", chave);
   abrirSessao(res);
   json(res, 200, { ok: true });
-};
+}
