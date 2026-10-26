@@ -33,9 +33,15 @@ final class Midia {
     boolean video() { return "video".equals(tipo); }
   }
 
+  /** A TV foi removida no gestor (token não vale mais). */
+  static final class Desconectada extends Exception { }
+
   final File pasta, copia;
   int versao;
+  String nome = "";
+  int rotacao; // 0, 90, 180 ou 270 — escolhida no gestor (TV presa em pé)
   List<Item> itens = new ArrayList<>();
+  volatile String token; // recebido no pareamento; sem ele a TV mostra o código
 
   Midia(File filesDir) {
     pasta = new File(filesDir, "midia");
@@ -52,8 +58,10 @@ final class Midia {
 
   /** Busca a playlist no painel. Devolve true se mudou. */
   boolean atualizar() throws Exception {
-    String txt = http(SITE + "/api/tv", null);
+    String txt = http(SITE + "/api/tv", null, token);
     JSONObject j = new JSONObject(txt);
+    nome = j.optString("nome");
+    rotacao = j.optInt("rotacao"); // muda sem mexer na versão da playlist
     if (j.optInt("versao") == versao && !itens.isEmpty()) return false;
     ler(j);
     try (OutputStream o = new FileOutputStream(copia)) { o.write(txt.getBytes(StandardCharsets.UTF_8)); }
@@ -62,6 +70,8 @@ final class Midia {
 
   private void ler(JSONObject j) {
     versao = j.optInt("versao");
+    nome = j.optString("nome");
+    rotacao = j.optInt("rotacao");
     List<Item> l = new ArrayList<>();
     JSONArray a = j.optJSONArray("itens");
     if (a != null) for (int i = 0; i < a.length(); i++) {
@@ -117,10 +127,20 @@ final class Midia {
 
   long livreMb() { return pasta.getUsableSpace() / (1024 * 1024); }
 
-  static String http(String url, String jsonPost) throws Exception {
+  /** Esquece a playlist e os arquivos (TV desconectada no gestor). */
+  void apagarTudo() {
+    itens = new ArrayList<>();
+    versao = 0;
+    nome = "";
+    copia.delete();
+    limpar();
+  }
+
+  static String http(String url, String jsonPost, String token) throws Exception {
     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
     c.setConnectTimeout(15000);
     c.setReadTimeout(20000);
+    if (token != null) c.setRequestProperty("Authorization", "Bearer " + token);
     if (jsonPost != null) {
       c.setRequestMethod("POST");
       c.setDoOutput(true);
@@ -131,8 +151,9 @@ final class Midia {
     InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
     String txt = in == null ? "" : new String(lerTudo(in), StandardCharsets.UTF_8);
     c.disconnect();
-    if (code >= 400) throw new Exception("HTTP " + code);
-    return txt;
+    if (code == 401 && token != null) throw new Desconectada();
+    if (code >= 400) throw new Exception("HTTP " + code + " " + txt);
+    return code == 202 ? "" : txt;
   }
 
   private static byte[] lerTudo(InputStream in) throws Exception {

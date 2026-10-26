@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#07080c">
+<title>Baixar TV do Estúdio — Grupo Mar</title>
+<link rel="icon" href="grupomar.png">
+<link rel="stylesheet" href="estilo.css">
+<style>
+  .pagina { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
+  .baixar { width: 100%; max-width: 560px; padding: 34px 30px 30px; display: flex; flex-direction: column; gap: 14px; border-radius: 28px; }
+  .baixar img { height: 52px; align-self: flex-start; }
+  .baixar h1 { margin: 6px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -.02em; }
+  .baixar p { margin: 0; color: var(--suave); }
+  .baixar .botao.primario { align-self: flex-start; padding: 13px 22px; font-size: 15px; text-decoration: none; margin-top: 4px; }
+  .baixar h2 { font-size: 15px; margin-top: 12px; }
+  .baixar ol { margin: 0; padding-left: 20px; color: var(--suave); display: flex; flex-direction: column; gap: 9px; }
+  .baixar strong { color: var(--texto); }
+</style>
+</head>
+<body>
+<main class="pagina">
+  <div class="cartao baixar">
+    <img src="grupomar-claro.png" alt="Grupo Mar">
+    <h1>TV do Estúdio</h1>
+    <p>App para as TVs do estúdio: passa em loop as fotos e vídeos enviados pelo Gestor de Telas.</p>
+    <a class="botao primario" href="tv-estudio.apk" download>Baixar o app (APK)</a>
+    <span class="fraco" id="versao">&nbsp;</span>
+
+    <h2>Instalar numa TV</h2>
+    <ol>
+      <li>Na TV, instale o app <strong>Downloader</strong> pela Play Store.</li>
+      <li>Abra o Downloader e digite <code>tv-podcast-grupomar.vercel.app/tv-estudio.apk</code></li>
+      <li>Permita a instalação e abra o <strong>TV do Estúdio</strong>. Aparece um código de 6 letras.</li>
+      <li>No <strong>Gestor de Telas</strong>, clique em <strong>+ Adicionar TV</strong>, digite o código e dê um nome. Pronto.</li>
+    </ol>
+    <p class="fraco">TV presa em pé? Aperte OK no controle para girar a tela do código. Depois, ajuste a posição em Opções da TV, no gestor.</p>
+  </div>
+</main>
+<script>
+  fetch("versao.json", { cache: "no-store" }).then((r) => r.json()).then((v) => {
+    document.getElementById("versao").textContent = `Versão ${v.versao} · ${v.data} · ${v.tamanho}`;
+  }).catch(() => {});
+</script>
+</body>
+</html>

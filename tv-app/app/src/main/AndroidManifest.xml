@@ -8,7 +8,7 @@
   <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
   <application
-      android:label="TV do Podcast"
+      android:label="TV do Estúdio"
       android:icon="@drawable/icone"
       android:banner="@drawable/banner"
       android:allowBackup="false"

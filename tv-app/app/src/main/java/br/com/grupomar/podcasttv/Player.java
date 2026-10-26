@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.os.Bundle;
@@ -15,39 +17,59 @@ import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.Surface;
+import android.view.TextureView;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.VideoView;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Toca em loop as fotos e vídeos da playlist do painel. É a tela inicial da TV do podcast. */
+/**
+ * Tela inicial das TVs do estúdio. Sem conexão, mostra um código para cadastrar no gestor; com
+ * conexão, toca em loop as fotos e vídeos da playlist daquela TV. Tudo fica dentro do "palco",
+ * que gira quando a TV está presa em pé (rotação escolhida no gestor).
+ */
 public class Player extends Activity {
-  private static final long SINCRONIA = 30_000, STATUS = 30_000, FADE = 600;
+  private static final long SINCRONIA = 30_000, STATUS = 30_000, FADE = 600, PAREAR = 3_000;
+  private static final String LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   private final Handler ui = new Handler(Looper.getMainLooper());
   private final ExecutorService rede = Executors.newSingleThreadExecutor();
+  private final SecureRandom sorteio = new SecureRandom();
   private Midia midia;
+  private File arqConexao;
 
-  private VideoView video;
+  private FrameLayout raiz, palco;
+  private TextureView video;
+  private Surface superficie;
+  private MediaPlayer mp;
   private ImageView fotoA, fotoB;
   private boolean fotoAFrente = true;
-  private View vazio;
-  private TextView vazioStatus;
+  private View telaCodigo, telaVazia;
+  private TextView codigoTxt, codigoDica, vazioNome, vazioStatus;
 
   private int pos = -1;
   private Midia.Item atual;
   private boolean tocando;
   private volatile int baixando;
-  private int larguraTela, alturaTela;
+  private int largura, altura, rotacao = -1;
+  private float k;
+
+  private String codigo, segredo;
+  private long codigoDesde;
 
   // ================= ciclo de vida =================
 
@@ -55,30 +77,47 @@ public class Player extends Activity {
     super.onCreate(b);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     DisplayMetrics dm = getResources().getDisplayMetrics();
-    larguraTela = Math.max(dm.widthPixels, dm.heightPixels);
-    alturaTela = Math.min(dm.widthPixels, dm.heightPixels);
+    largura = Math.max(dm.widthPixels, dm.heightPixels);
+    altura = Math.min(dm.widthPixels, dm.heightPixels);
 
-    FrameLayout raiz = new FrameLayout(this);
+    raiz = new FrameLayout(this);
     raiz.setBackgroundColor(Color.BLACK);
-    video = new VideoView(this);
-    raiz.addView(video, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+    palco = new FrameLayout(this);
+    raiz.addView(palco);
+
+    video = new TextureView(this);
+    video.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+      @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
+        superficie = new Surface(st);
+        if (atual != null && atual.video()) tocarVideo(atual, midia.prontos().size() == 1);
+      }
+      @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
+      @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
+        pararVideo();
+        if (superficie != null) superficie.release();
+        superficie = null;
+        return true;
+      }
+      @Override public void onSurfaceTextureUpdated(SurfaceTexture st) { }
+    });
+    video.setVisibility(View.INVISIBLE);
+    palco.addView(video, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
     fotoA = foto();
     fotoB = foto();
-    raiz.addView(fotoA, new FrameLayout.LayoutParams(-1, -1));
-    raiz.addView(fotoB, new FrameLayout.LayoutParams(-1, -1));
-    vazio = telaVazia();
-    raiz.addView(vazio, new FrameLayout.LayoutParams(-1, -1));
+    palco.addView(fotoA, new FrameLayout.LayoutParams(-1, -1));
+    palco.addView(fotoB, new FrameLayout.LayoutParams(-1, -1));
     setContentView(raiz);
 
-    video.setOnCompletionListener(mp -> proximo());
-    video.setOnErrorListener((mp, w, e) -> { ui.postDelayed(this::proximo, 1000); return true; });
-
     midia = new Midia(getFilesDir());
+    arqConexao = new File(getFilesDir(), "tv.json");
+    lerConexao();
     midia.carregarCopia();
+    aplicarRotacao(midia.rotacao != 0 ? midia.rotacao : rotacaoLocal);
   }
 
   @Override protected void onStart() {
     super.onStart();
+    if (midia.token == null) { mostrarCodigo(); return; }
     ui.post(sincronia);
     ui.postDelayed(status, 5000);
     if (!tocando) proximo();
@@ -87,7 +126,7 @@ public class Player extends Activity {
   @Override protected void onStop() {
     super.onStop();
     ui.removeCallbacksAndMessages(null);
-    video.stopPlayback();
+    pararVideo();
     tocando = false;
     pos = -1;
   }
@@ -100,7 +139,144 @@ public class Player extends Activity {
       catch (Exception ignored) { }
       return true;
     }
+    // sem conexão: OK gira a tela, para dar para ler o código numa TV presa em pé
+    if (midia.token == null && (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER)) {
+      rotacaoLocal = (rotacao + 90) % 360;
+      salvarConexao();
+      aplicarRotacao(rotacaoLocal);
+      return true;
+    }
     return super.onKeyDown(code, e);
+  }
+
+  // ================= rotação =================
+
+  private int rotacaoLocal;
+
+  /** Gira o palco inteiro. Em retrato ele fica com as medidas trocadas e roda em volta do centro. */
+  private void aplicarRotacao(int r) {
+    r = ((r % 360) + 360) % 360;
+    if (r == rotacao) return;
+    rotacao = r;
+    boolean emPe = r == 90 || r == 270;
+    int w = emPe ? altura : largura, h = emPe ? largura : altura;
+    k = w / (emPe ? 540f : 960f);
+    palco.setLayoutParams(new FrameLayout.LayoutParams(w, h, Gravity.CENTER));
+    palco.setRotation(r);
+    // as telas de texto são remontadas para o novo tamanho
+    if (telaCodigo != null) { palco.removeView(telaCodigo); telaCodigo = null; }
+    if (telaVazia != null) { palco.removeView(telaVazia); telaVazia = null; }
+    if (midia.token == null) mostrarCodigo();
+    else if (!tocando) mostrarVazia();
+    ajustarVideo();
+  }
+
+  // ================= conexão com o gestor =================
+
+  private void lerConexao() {
+    try {
+      if (!arqConexao.exists()) return;
+      byte[] b = new byte[(int) arqConexao.length()];
+      try (FileInputStream in = new FileInputStream(arqConexao)) { in.read(b); }
+      JSONObject j = new JSONObject(new String(b, StandardCharsets.UTF_8));
+      String t = j.optString("token");
+      midia.token = t.matches("[a-f0-9]{64}") ? t : null;
+      rotacaoLocal = j.optInt("rotacao");
+    } catch (Exception ignored) { }
+  }
+
+  private void salvarConexao() {
+    try {
+      JSONObject j = new JSONObject();
+      if (midia.token != null) j.put("token", midia.token);
+      j.put("rotacao", rotacaoLocal);
+      try (FileOutputStream o = new FileOutputStream(arqConexao)) { o.write(j.toString().getBytes(StandardCharsets.UTF_8)); }
+    } catch (Exception ignored) { }
+  }
+
+  /** O gestor removeu esta TV: esquece tudo e volta a mostrar um código. */
+  private void desconectada() {
+    midia.token = null;
+    salvarConexao();
+    ui.removeCallbacksAndMessages(null);
+    pararVideo();
+    tocando = false;
+    atual = null;
+    fotoA.setImageDrawable(null);
+    fotoB.setImageDrawable(null);
+    rede.execute(midia::apagarTudo);
+    mostrarCodigo();
+  }
+
+  private void mostrarCodigo() {
+    if (telaVazia != null) telaVazia.setVisibility(View.GONE);
+    if (telaCodigo == null) { telaCodigo = montarTelaCodigo(); palco.addView(telaCodigo, new FrameLayout.LayoutParams(-1, -1)); }
+    telaCodigo.setVisibility(View.VISIBLE);
+    telaCodigo.bringToFront();
+    if (codigo == null || System.currentTimeMillis() - codigoDesde > 14 * 60_000L) novoCodigo();
+    else codigoTxt.setText(codigo.substring(0, 3) + " " + codigo.substring(3));
+    ui.removeCallbacks(esperaPar);
+    ui.postDelayed(esperaPar, PAREAR);
+  }
+
+  private void novoCodigo() {
+    StringBuilder c = new StringBuilder();
+    for (int i = 0; i < 6; i++) c.append(LETRAS.charAt(sorteio.nextInt(LETRAS.length())));
+    byte[] s = new byte[16];
+    sorteio.nextBytes(s);
+    StringBuilder h = new StringBuilder();
+    for (byte x : s) h.append(String.format("%02x", x));
+    codigo = c.toString();
+    segredo = h.toString();
+    codigoDesde = System.currentTimeMillis();
+    codigoTxt.setText(codigo.substring(0, 3) + " " + codigo.substring(3));
+    codigoDica.setText("Conectando…");
+    final String cod = codigo, seg = segredo;
+    rede.execute(() -> {
+      try {
+        JSONObject j = new JSONObject();
+        j.put("codigo", cod);
+        j.put("segredo", seg);
+        Midia.http(Midia.SITE + "/api/parear", j.toString(), null);
+        ui.post(() -> { if (cod.equals(codigo)) codigoDica.setText("O código vale por 15 minutos · OK no controle gira a tela"); });
+      } catch (Exception e) {
+        // sem internet ou código repetido: tenta outro daqui a pouco
+        ui.post(() -> { if (cod.equals(codigo)) { codigoDica.setText("Sem conexão com a internet. Tentando de novo…"); codigoDesde = 0; } });
+      }
+    });
+  }
+
+  private final Runnable esperaPar = new Runnable() {
+    @Override public void run() {
+      if (midia.token != null) return;
+      if (System.currentTimeMillis() - codigoDesde > 14 * 60_000L) novoCodigo();
+      ui.postDelayed(this, PAREAR);
+      final String cod = codigo, seg = segredo;
+      rede.execute(() -> {
+        try {
+          String r = Midia.http(Midia.SITE + "/api/parear?codigo=" + cod + "&segredo=" + seg, null, null);
+          if (r.isEmpty()) return; // ainda esperando o gestor
+          JSONObject j = new JSONObject(r);
+          String token = j.optString("token");
+          if (!token.matches("[a-f0-9]{64}")) return;
+          ui.post(() -> conectada(token));
+        } catch (Exception e) {
+          if (String.valueOf(e.getMessage()).startsWith("HTTP 410")) ui.post(() -> codigoDesde = 0); // expirou
+        }
+      });
+    }
+  };
+
+  private void conectada(String token) {
+    if (midia.token != null) return;
+    midia.token = token;
+    salvarConexao();
+    ui.removeCallbacks(esperaPar);
+    codigo = null;
+    if (telaCodigo != null) telaCodigo.setVisibility(View.GONE);
+    mostrarVazia();
+    ui.post(sincronia);
+    ui.postDelayed(status, 3000);
   }
 
   // ================= sincronia com o painel =================
@@ -111,6 +287,7 @@ public class Player extends Activity {
       rede.execute(() -> {
         try {
           midia.atualizar();
+          ui.post(() -> aplicarRotacao(midia.rotacao));
           midia.limpar();
           List<Midia.Item> falta = midia.faltando();
           baixando = falta.size();
@@ -121,10 +298,13 @@ public class Player extends Activity {
             ui.post(() -> { if (!tocando) proximo(); });
           }
           baixando = midia.faltando().size();
+        } catch (Midia.Desconectada d) {
+          ui.post(Player.this::desconectada);
+          return;
         } catch (Exception ignored) {
           // sem internet: segue tocando o que já tem
         }
-        ui.post(() -> { if (!tocando) proximo(); atualizarVazio(); });
+        ui.post(() -> { if (!tocando) proximo(); atualizarVazia(); });
       });
     }
   };
@@ -133,6 +313,8 @@ public class Player extends Activity {
     @Override public void run() {
       ui.postDelayed(this, STATUS);
       final String item = atual != null && tocando ? atual.id : "";
+      final String token = midia.token;
+      if (token == null) return;
       rede.execute(() -> {
         try {
           JSONObject j = new JSONObject();
@@ -141,7 +323,9 @@ public class Player extends Activity {
           j.put("app", versao());
           j.put("baixando", baixando);
           j.put("livreMb", midia.livreMb());
-          Midia.http(Midia.SITE + "/api/tv", j.toString());
+          Midia.http(Midia.SITE + "/api/tv", j.toString(), token);
+        } catch (Midia.Desconectada d) {
+          ui.post(Player.this::desconectada);
         } catch (Exception ignored) { }
       });
     }
@@ -158,37 +342,26 @@ public class Player extends Activity {
 
   private void proximo() {
     ui.removeCallbacks(fimFoto);
+    if (midia.token == null) return;
     List<Midia.Item> lista = midia.prontos();
     if (lista.isEmpty()) {
       tocando = false;
       atual = null;
-      video.stopPlayback();
-      video.setVisibility(View.INVISIBLE);
+      pararVideo();
       fotoA.setImageDrawable(null);
       fotoB.setImageDrawable(null);
-      atualizarVazio();
-      vazio.setVisibility(View.VISIBLE);
+      mostrarVazia();
       return;
     }
-    vazio.setVisibility(View.GONE);
+    if (telaVazia != null) telaVazia.setVisibility(View.GONE);
     tocando = true;
     pos = (pos + 1) % lista.size();
     atual = lista.get(pos);
 
     if (atual.video()) {
-      final Midia.Item it = atual;
-      final boolean sozinho = lista.size() == 1;
       fotoA.animate().alpha(0f).setDuration(FADE).start();
       fotoB.animate().alpha(0f).setDuration(FADE).start();
-      video.setVisibility(View.VISIBLE);
-      video.setOnPreparedListener(mp -> {
-        float v = it.som ? 1f : 0f;
-        mp.setVolume(v, v);
-        mp.setLooping(sozinho);
-        mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
-      });
-      video.setVideoPath(it.arquivo.getAbsolutePath());
-      video.start();
+      tocarVideo(atual, lista.size() == 1);
     } else {
       Bitmap bmp = abrirFoto(atual);
       if (bmp == null) { ui.postDelayed(this::proximo, 500); return; }
@@ -196,18 +369,55 @@ public class Player extends Activity {
       fotoAFrente = !fotoAFrente;
       entra.setImageBitmap(bmp);
       entra.bringToFront();
-      vazio.bringToFront();
       entra.setAlpha(0f);
       entra.animate().alpha(1f).setDuration(FADE).withEndAction(() -> {
         sai.setImageDrawable(null); // solta a foto anterior
         sai.setAlpha(0f);
-        if (video.isPlaying() || video.getVisibility() == View.VISIBLE) {
-          video.stopPlayback();
-          video.setVisibility(View.INVISIBLE);
-        }
+        pararVideo();
       }).start();
       ui.postDelayed(fimFoto, atual.duracao * 1000L);
     }
+  }
+
+  /** Vídeo num TextureView (que gira junto com o palco, ao contrário do VideoView). */
+  private void tocarVideo(Midia.Item it, boolean sozinho) {
+    if (superficie == null) { video.setVisibility(View.VISIBLE); return; } // toca quando a superfície existir
+    pararVideo();
+    try {
+      mp = new MediaPlayer();
+      mp.setSurface(superficie);
+      mp.setDataSource(it.arquivo.getAbsolutePath());
+      mp.setLooping(sozinho);
+      float v = it.som ? 1f : 0f;
+      mp.setVolume(v, v);
+      mp.setOnVideoSizeChangedListener((p, w, h) -> ajustarVideo());
+      mp.setOnCompletionListener(p -> proximo());
+      mp.setOnErrorListener((p, a, b) -> { ui.postDelayed(this::proximo, 1000); return true; });
+      mp.setOnPreparedListener(p -> { ajustarVideo(); video.setVisibility(View.VISIBLE); p.start(); });
+      mp.prepareAsync();
+    } catch (Exception e) {
+      ui.postDelayed(this::proximo, 1000);
+    }
+  }
+
+  private void pararVideo() {
+    if (mp != null) {
+      try { mp.stop(); } catch (Exception ignored) { }
+      mp.release();
+      mp = null;
+    }
+    if (atual == null || !atual.video()) video.setVisibility(View.INVISIBLE);
+  }
+
+  /** Encaixa o vídeo no palco sem distorcer (com faixas pretas se a proporção for outra). */
+  private void ajustarVideo() {
+    if (mp == null || palco.getLayoutParams() == null) return;
+    int vw, vh;
+    try { vw = mp.getVideoWidth(); vh = mp.getVideoHeight(); } catch (Exception e) { return; }
+    if (vw <= 0 || vh <= 0) return;
+    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) palco.getLayoutParams();
+    float escala = Math.min((float) lp.width / vw, (float) lp.height / vh);
+    video.setLayoutParams(new FrameLayout.LayoutParams(Math.round(vw * escala), Math.round(vh * escala), Gravity.CENTER));
   }
 
   /** Abre a foto já reduzida ao tamanho da tela (a TV tem pouca memória). */
@@ -217,7 +427,7 @@ public class Player extends Activity {
       o.inJustDecodeBounds = true;
       BitmapFactory.decodeFile(it.arquivo.getAbsolutePath(), o);
       int amostra = 1;
-      while (o.outWidth / (amostra * 2) >= larguraTela && o.outHeight / (amostra * 2) >= alturaTela) amostra *= 2;
+      while (o.outWidth / (amostra * 2) >= largura && o.outHeight / (amostra * 2) >= largura) amostra *= 2;
       o = new BitmapFactory.Options();
       o.inSampleSize = amostra;
       return BitmapFactory.decodeFile(it.arquivo.getAbsolutePath(), o);
@@ -226,56 +436,106 @@ public class Player extends Activity {
     }
   }
 
-  // ================= telas =================
+  // ================= telas (vidro escuro) =================
 
   private ImageView foto() {
     ImageView i = new ImageView(this);
     i.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    i.setBackgroundColor(Color.TRANSPARENT);
     i.setAlpha(0f);
     return i;
   }
 
-  private View telaVazia() {
-    float k = larguraTela / 960f;
-    LinearLayout l = new LinearLayout(this);
-    l.setOrientation(LinearLayout.VERTICAL);
-    l.setGravity(Gravity.CENTER);
-    l.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-        new int[] {0xFFFDF3E3, 0xFFEEF2F7, 0xFFDCE8F0}));
-    ImageView logo = new ImageView(this);
-    logo.setImageResource(R.drawable.logo);
-    logo.setAdjustViewBounds(true);
-    l.addView(logo, new LinearLayout.LayoutParams(-2, Math.round(90 * k)));
-    TextView t = texto(26 * k, 0xFF141B2A);
-    t.setText("TV do Podcast");
-    LinearLayout.LayoutParams pt = new LinearLayout.LayoutParams(-2, -2);
-    pt.topMargin = Math.round(28 * k);
-    l.addView(t, pt);
-    TextView d = texto(14 * k, 0xA6141B2A);
-    d.setText("Envie fotos e vídeos pelo painel: " + Midia.SITE.replace("https://", ""));
-    LinearLayout.LayoutParams pd = new LinearLayout.LayoutParams(-2, -2);
-    pd.topMargin = Math.round(10 * k);
-    l.addView(d, pd);
-    vazioStatus = texto(11 * k, 0xFFC87300);
-    LinearLayout.LayoutParams ps = new LinearLayout.LayoutParams(-2, -2);
-    ps.topMargin = Math.round(18 * k);
-    l.addView(vazioStatus, ps);
-    return l;
+  private GradientDrawable fundo() {
+    GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+        new int[] {0xFF241A0C, 0xFF0B0C12, 0xFF0A1424});
+    return g;
   }
 
-  private void atualizarVazio() {
-    if (vazioStatus == null) return;
+  private LinearLayout cartaoVidro() {
+    LinearLayout c = new LinearLayout(this);
+    c.setOrientation(LinearLayout.VERTICAL);
+    c.setGravity(Gravity.CENTER);
+    GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        new int[] {0x24FFFFFF, 0x10FFFFFF});
+    g.setCornerRadius(28 * k);
+    g.setStroke(Math.max(1, Math.round(k)), 0x2EFFFFFF);
+    c.setBackground(g);
+    int p = Math.round(36 * k);
+    c.setPadding(p, p, p, p);
+    return c;
+  }
+
+  private View montarTelaCodigo() {
+    FrameLayout f = new FrameLayout(this);
+    f.setBackground(fundo());
+    LinearLayout c = cartaoVidro();
+    ImageView logo = new ImageView(this);
+    logo.setImageResource(R.drawable.logo_claro);
+    logo.setAdjustViewBounds(true);
+    c.addView(logo, new LinearLayout.LayoutParams(-2, Math.round(54 * k)));
+    TextView t = texto(22 * k, 0xF0FFFFFF, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    t.setText("Conectar esta TV");
+    c.addView(t, margem(22));
+    TextView d = texto(13 * k, 0x9EEBEBF5, null);
+    d.setText("No Gestor de Telas, clique em  + Adicionar TV  e digite:");
+    c.addView(d, margem(8));
+    codigoTxt = texto(58 * k, Color.WHITE, Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+    codigoTxt.setLetterSpacing(0.12f);
+    c.addView(codigoTxt, margem(16));
+    TextView site = texto(12 * k, 0x9EEBEBF5, null);
+    site.setText(Midia.SITE.replace("https://", ""));
+    c.addView(site, margem(14));
+    codigoDica = texto(11 * k, 0x66EBEBF5, null);
+    c.addView(codigoDica, margem(6));
+    f.addView(c, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+    return f;
+  }
+
+  private void mostrarVazia() {
+    if (telaVazia == null) {
+      FrameLayout f = new FrameLayout(this);
+      f.setBackground(fundo());
+      LinearLayout c = cartaoVidro();
+      ImageView logo = new ImageView(this);
+      logo.setImageResource(R.drawable.logo_claro);
+      logo.setAdjustViewBounds(true);
+      c.addView(logo, new LinearLayout.LayoutParams(-2, Math.round(54 * k)));
+      vazioNome = texto(22 * k, 0xF0FFFFFF, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+      c.addView(vazioNome, margem(22));
+      TextView d = texto(13 * k, 0x9EEBEBF5, null);
+      d.setText("Nada no ar. Envie fotos e vídeos pelo Gestor de Telas.");
+      c.addView(d, margem(8));
+      vazioStatus = texto(11 * k, 0xFFFF9F0A, null);
+      c.addView(vazioStatus, margem(12));
+      f.addView(c, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+      telaVazia = f;
+      palco.addView(telaVazia, new FrameLayout.LayoutParams(-1, -1));
+    }
+    telaVazia.setVisibility(View.VISIBLE);
+    telaVazia.bringToFront();
+    atualizarVazia();
+  }
+
+  private void atualizarVazia() {
+    if (vazioNome == null) return;
+    vazioNome.setText(midia.nome.isEmpty() ? "TV do Estúdio" : midia.nome);
     if (baixando > 0) vazioStatus.setText("Baixando " + baixando + (baixando == 1 ? " arquivo…" : " arquivos…"));
     else if (!midia.itens.isEmpty() && midia.prontos().isEmpty()) vazioStatus.setText("Sem espaço livre na TV para os arquivos");
     else vazioStatus.setText("");
   }
 
-  private TextView texto(float px, int cor) {
+  private LinearLayout.LayoutParams margem(float topo) {
+    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
+    p.topMargin = Math.round(topo * k);
+    return p;
+  }
+
+  private TextView texto(float px, int cor, Typeface fonte) {
     TextView t = new TextView(this);
     t.setTextSize(TypedValue.COMPLEX_UNIT_PX, px);
     t.setTextColor(cor);
     t.setGravity(Gravity.CENTER);
+    if (fonte != null) t.setTypeface(fonte);
     return t;
   }
 }

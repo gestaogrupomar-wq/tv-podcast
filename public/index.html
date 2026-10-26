@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>TV do Podcast — Grupo Mar</title>
+<meta name="theme-color" content="#0a0c10">
+<title>TV do Estúdio — Grupo Mar</title>
 <link rel="icon" href="grupomar.png">
 <link rel="stylesheet" href="estilo.css">
 </head>
@@ -12,55 +13,134 @@
 
 <!-- entrada -->
 <section id="entrar" class="entrar" hidden>
-  <form class="vidro cartao-entrar" id="form-entrar">
-    <img src="grupomar.png" alt="Grupo Mar" class="logo-entrar">
-    <h1>TV do Podcast</h1>
-    <p>Entre com a senha do painel.</p>
+  <form class="cartao cartao-entrar" id="form-entrar">
+    <img src="grupomar-claro.png" alt="Grupo Mar" class="logo-entrar">
+    <div class="rotulo-entrar">TV do Estúdio</div>
+    <p>Entre com a senha do gestor.</p>
     <input type="password" id="senha" placeholder="Senha" autocomplete="current-password" required>
-    <button type="submit" class="botao">Entrar</button>
+    <button type="submit" class="botao primario">Entrar</button>
     <div class="erro" id="erro-entrar"></div>
   </form>
 </section>
 
-<!-- painel -->
+<!-- gestor -->
 <section id="painel" hidden>
   <header class="topo">
-    <img src="grupomar.png" alt="Grupo Mar" class="logo">
-    <div class="titulo">
-      <h1>TV do Podcast</h1>
-      <span id="status-pilula" class="pilula off">TV offline</span>
+    <img src="grupomar-claro.png" alt="Grupo Mar" class="logo">
+    <div class="marca">
+      <strong>Gestor de Telas</strong>
     </div>
-    <button class="link" id="sair">Sair</button>
+    <nav class="tvs" id="tvs"></nav>
+    <button class="botao" id="adicionar-tv">+ Adicionar TV</button>
+    <button class="botao fantasma" id="sair" title="Sair">Sair</button>
   </header>
 
-  <main class="grade">
-    <div class="coluna-tv">
-      <div class="tv">
-        <div class="tela" id="previa"><div class="vazio">A playlist está vazia</div></div>
-        <div class="pe"></div>
+  <!-- sem TVs -->
+  <main id="sem-tvs" class="sem-tvs" hidden>
+    <div class="cartao">
+      <div class="rotulo"><span class="led vermelho"></span> Nenhuma TV conectada</div>
+      <h2>Conecte a primeira TV</h2>
+      <ol class="passos">
+        <li>Na TV, instale o app pelo endereço <code>tv-podcast-grupomar.vercel.app/baixar</code></li>
+        <li>Abra o <strong>TV do Estúdio</strong>: aparece um código de 6 letras na tela.</li>
+        <li>Clique em <strong>+ Adicionar TV</strong>, digite o código e dê um nome.</li>
+      </ol>
+      <button class="botao primario" id="adicionar-tv-2">+ Adicionar TV</button>
+    </div>
+  </main>
+
+  <!-- com TVs -->
+  <main id="mesa" class="mesa" hidden>
+    <div class="coluna-monitor">
+      <div class="monitor">
+        <div class="monitor-topo">
+          <span class="rotulo"><span class="led" id="led-tv"></span> <span id="nome-tv">TV</span></span>
+          <span class="rotulo fraco">Prévia sem som</span>
+          <button class="botao fantasma pequeno" id="opcoes-tv">Opções da TV</button>
+        </div>
+        <div class="tela" id="previa"><div class="vazio">Nada no ar</div></div>
+        <div class="monitor-base">
+          <span class="tc" id="tc">00:00</span>
+          <span id="previa-nome" class="previa-nome">—</span>
+          <span class="rotulo fraco" id="previa-pos"></span>
+        </div>
       </div>
-      <div class="vidro status" id="status-texto">Procurando a TV…</div>
+      <div class="cartao status" id="status-texto">Procurando a TV…</div>
     </div>
 
     <div class="coluna-lista">
-      <label class="vidro envio" id="envio">
+      <label class="cartao envio" id="envio">
         <input type="file" id="arquivos" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden>
-        <strong>Enviar fotos ou vídeos</strong>
-        <span>Clique ou arraste aqui · JPG, PNG, WebP ou MP4 · até 60 MB cada</span>
+        <span class="envio-icone">↑</span>
+        <strong>Enviar para <span id="envio-tv">esta TV</span></strong>
+        <span class="fraco">Clique ou arraste · JPG, PNG, WebP ou MP4 · até 60 MB</span>
         <div class="progresso" id="progresso" hidden><div></div></div>
       </label>
 
-      <div class="vidro lista">
+      <div class="cartao lista">
         <div class="lista-topo">
-          <h2>Playlist</h2>
-          <span id="resumo"></span>
+          <span class="rotulo">Playlist</span>
+          <span class="fraco" id="resumo"></span>
         </div>
         <ol id="itens"></ol>
-        <p class="dica">Arraste ⠿ para mudar a ordem. Itens pausados não passam na TV.</p>
+        <p class="dica">Arraste ⠿ para mudar a ordem. Itens pausados não vão ao ar.</p>
       </div>
     </div>
   </main>
 </section>
+
+<!-- janela: adicionar TV -->
+<dialog id="dlg-adicionar" class="janela">
+  <form method="dialog" id="form-adicionar">
+    <div class="rotulo">Adicionar TV</div>
+    <h2>Digite o código da tela</h2>
+    <p class="fraco">Abra o app TV do Estúdio na TV: o código de 6 letras aparece na tela.</p>
+    <input id="codigo" class="codigo" maxlength="7" placeholder="ABC123" autocomplete="off" autocapitalize="characters" required>
+    <input id="nome-nova" placeholder="Nome da TV (ex.: Estúdio principal)" maxlength="40" required>
+    <div class="erro" id="erro-adicionar"></div>
+    <div class="janela-botoes">
+      <button type="button" class="botao fantasma" data-fechar>Cancelar</button>
+      <button type="submit" class="botao primario">Conectar TV</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- janela: opções da TV -->
+<dialog id="dlg-opcoes" class="janela">
+  <form method="dialog" id="form-opcoes">
+    <div class="rotulo">Opções da TV</div>
+    <label class="campo">Nome<input id="renomear" maxlength="40" required></label>
+    <div class="campo">Posição da tela
+      <div class="giros" id="giros">
+        <label><input type="radio" name="rotacao" value="0"><span class="icone-tv"></span> Paisagem</label>
+        <label><input type="radio" name="rotacao" value="90"><span class="icone-tv r90"></span> Retrato ↻</label>
+        <label><input type="radio" name="rotacao" value="270"><span class="icone-tv r270"></span> Retrato ↺</label>
+        <label><input type="radio" name="rotacao" value="180"><span class="icone-tv"></span> De cabeça p/ baixo</label>
+      </div>
+    </div>
+    <p class="fraco">Retrato ↻ = TV presa em pé, girada para a direita. Se a imagem aparecer deitada, troque para ↺.</p>
+    <div class="erro" id="erro-opcoes"></div>
+    <div class="janela-botoes">
+      <button type="button" class="botao perigo" id="remover-tv">Remover TV</button>
+      <span class="espaco"></span>
+      <button type="button" class="botao fantasma" data-fechar>Fechar</button>
+      <button type="submit" class="botao primario">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- janela: copiar item para outras TVs -->
+<dialog id="dlg-copiar" class="janela">
+  <form method="dialog" id="form-copiar">
+    <div class="rotulo">Copiar para outras TVs</div>
+    <h2 id="copiar-nome"></h2>
+    <div id="copiar-tvs" class="copiar-tvs"></div>
+    <div class="janela-botoes">
+      <button type="button" class="botao fantasma" data-fechar>Cancelar</button>
+      <button type="submit" class="botao primario">Copiar</button>
+    </div>
+  </form>
+</dialog>
 
 <script type="module" src="app.js"></script>
 </body>

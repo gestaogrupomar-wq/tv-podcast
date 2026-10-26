@@ -69,18 +69,41 @@ function senhaCerta(tentativa) {
   return crypto.timingSafeEqual(a, b) && !!process.env.PAINEL_SENHA;
 }
 
-// ---------- playlist ----------
-// { versao, itens: [{ id, url, pathname, tipo: "foto"|"video", nome, bytes, duracao, som, ativo }] }
+// ---------- TVs e playlists ----------
+// podcast:tvs              → [{ id, nome, criada }]
+// podcast:token:<sha256>   → id da TV dona daquele token (o token em si só a TV guarda)
+// podcast:playlist:<id>    → { versao, itens: [{ id, url, pathname, tipo, nome, bytes, duracao, som, ativo }] }
+// podcast:status:<id>      → último "estou viva" da TV (expira em 1 h)
 
-async function lerPlaylist() {
-  const txt = await redis("GET", "podcast:playlist");
+const sha = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
+
+async function lerTvs() {
+  const txt = await redis("GET", "podcast:tvs");
+  return txt ? JSON.parse(txt) : [];
+}
+
+async function salvarTvs(l) {
+  await redis("SET", "podcast:tvs", JSON.stringify(l));
+}
+
+async function lerPlaylist(tv) {
+  const txt = await redis("GET", "podcast:playlist:" + tv);
   return txt ? JSON.parse(txt) : { versao: 0, itens: [] };
 }
 
-async function salvarPlaylist(p) {
+async function salvarPlaylist(tv, p) {
   p.versao = (p.versao || 0) + 1;
-  await redis("SET", "podcast:playlist", JSON.stringify(p));
+  await redis("SET", "podcast:playlist:" + tv, JSON.stringify(p));
   return p;
+}
+
+/** TV dona do token enviado em "Authorization: Bearer <token>" (ou null). */
+async function tvDoPedido(req) {
+  const m = String(req.headers.authorization || "").match(/^Bearer ([a-f0-9]{64})$/);
+  if (!m) return null;
+  const id = await redis("GET", "podcast:token:" + sha(m[1]));
+  if (!id) return null;
+  return (await lerTvs()).some((t) => t.id === id) ? id : null; // TV removida no gestor: token não vale mais
 }
 
 // ---------- respostas ----------
@@ -100,5 +123,5 @@ function exigirLogin(req, res) {
 
 module.exports = {
   MAX_BYTES, TIPOS, redis, logado, abrirSessao, fecharSessao, senhaCerta,
-  lerPlaylist, salvarPlaylist, json, exigirLogin,
+  sha, lerTvs, salvarTvs, lerPlaylist, salvarPlaylist, tvDoPedido, json, exigirLogin,
 };

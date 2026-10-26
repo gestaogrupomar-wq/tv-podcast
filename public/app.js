@@ -1,8 +1,9 @@
 const $ = (id) => document.getElementById(id);
+let tvs = [];
+let atual = null; // id da TV aberta
 let playlist = { versao: 0, itens: [] };
-let statusTv = null;
 
-// ---------------- sessão ----------------
+// ---------------- servidor ----------------
 
 async function api(caminho, opcoes = {}) {
   const r = await fetch(caminho, {
@@ -16,6 +17,15 @@ async function api(caminho, opcoes = {}) {
   return j;
 }
 
+const playlistApi = (corpo) => api("/api/playlist", { method: "POST", body: { tv: atual, ...corpo } });
+
+function lembrar(chave, valor) {
+  try { valor === undefined ? (valor = localStorage.getItem(chave)) : localStorage.setItem(chave, valor); } catch {}
+  return valor;
+}
+
+// ---------------- sessão ----------------
+
 function mostrarEntrada() {
   $("painel").hidden = true;
   $("entrar").hidden = false;
@@ -27,9 +37,8 @@ async function iniciar() {
   if (!s.logado) return mostrarEntrada();
   $("entrar").hidden = true;
   $("painel").hidden = false;
-  await carregar();
-  atualizarStatus();
-  setInterval(atualizarStatus, 10000);
+  await carregarTvs();
+  setInterval(carregarTvs, 10000);
 }
 
 $("form-entrar").addEventListener("submit", async (e) => {
@@ -49,23 +58,147 @@ $("sair").addEventListener("click", async () => {
   mostrarEntrada();
 });
 
-// ---------------- playlist ----------------
+// ---------------- TVs ----------------
 
-async function carregar() {
-  playlist = await api("/api/playlist");
+const online = (t) => t.status && Date.now() - t.status.em < 90000;
+
+async function carregarTvs() {
+  try { tvs = await api("/api/tvs"); } catch { return; }
+  if (!tvs.find((t) => t.id === atual)) {
+    const salvo = lembrar("tv");
+    atual = (tvs.find((t) => t.id === salvo) || tvs[0] || {}).id || null;
+    if (atual) await abrirTv(atual);
+  }
+  desenharTvs();
+  desenharStatus();
+}
+
+function desenharTvs() {
+  $("sem-tvs").hidden = tvs.length > 0;
+  $("mesa").hidden = tvs.length === 0;
+  const nav = $("tvs");
+  nav.innerHTML = tvs.length ? '<span class="segmentos"></span>' : "";
+  const seg = nav.firstElementChild;
+  for (const t of tvs) {
+    const b = document.createElement("button");
+    b.className = "aba" + (t.id === atual ? " atual" : "");
+    b.innerHTML = `<span class="led ${online(t) ? "verde" : "vermelho"}"></span>${escapar(t.nome)}`;
+    b.title = online(t) ? "Online" : "Offline";
+    b.onclick = () => abrirTv(t.id);
+    seg.appendChild(b);
+  }
+  const tv = tvs.find((t) => t.id === atual);
+  if (tv) {
+    $("nome-tv").textContent = tv.nome;
+    $("envio-tv").textContent = tv.nome;
+    $("led-tv").className = "led " + (online(tv) ? "verde" : "vermelho");
+    $("previa").classList.toggle("retrato", tv.rotacao === 90 || tv.rotacao === 270);
+  }
+}
+
+async function abrirTv(id) {
+  atual = id;
+  lembrar("tv", id);
+  desenharTvs();
+  try { playlist = await api("/api/playlist?tv=" + encodeURIComponent(id)); } catch { return; }
   desenharLista();
   reiniciarPrevia();
+  desenharStatus();
 }
+
+function desenharStatus() {
+  const tv = tvs.find((t) => t.id === atual);
+  if (!tv) return;
+  const s = tv.status, el = $("status-texto");
+  if (!s) {
+    el.innerHTML = "<span>A TV ainda não deu sinal. Confira se ela está ligada, na internet e com o app aberto.</span>";
+  } else {
+    const seg = Math.round((Date.now() - s.em) / 1000);
+    const quando = seg < 60 ? `há ${seg} s` : seg < 3600 ? `há ${Math.round(seg / 60)} min` : "há mais de 1 h";
+    const item = playlist.itens.find((i) => i.id === s.item);
+    const partes = [];
+    if (online(tv)) partes.push(item ? `No ar: <strong>${escapar(item.nome)}</strong>` : "<strong>TV ligada</strong>, nada no ar");
+    else partes.push(`<strong>Offline</strong>`);
+    partes.push(`último sinal ${quando}`);
+    if (s.versao && s.versao < playlist.versao) partes.push("atualizando a playlist…");
+    if (s.baixando) partes.push(`baixando ${s.baixando} arquivo${s.baixando > 1 ? "s" : ""}`);
+    if (s.livreMb) partes.push(`${(s.livreMb / 1024).toFixed(1).replace(".", ",")} GB livres`);
+    if (s.app) partes.push(`app ${escapar(s.app)}`);
+    el.innerHTML = partes.map((p) => `<span>${p}</span>`).join("");
+  }
+  // marca na lista o que está no ar de verdade
+  document.querySelectorAll(".item").forEach((li) => {
+    const noAr = online(tv) && s && playlist.itens[li.dataset.idx]?.id === s.item;
+    li.classList.toggle("no-ar", !!noAr);
+    li.querySelector(".tag.ar")?.toggleAttribute("hidden", !noAr);
+  });
+}
+
+// adicionar TV
+for (const b of [$("adicionar-tv"), $("adicionar-tv-2")]) {
+  b.addEventListener("click", () => {
+    $("erro-adicionar").textContent = "";
+    $("form-adicionar").reset();
+    $("dlg-adicionar").showModal();
+    $("codigo").focus();
+  });
+}
+$("form-adicionar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("erro-adicionar").textContent = "";
+  try {
+    const tv = await api("/api/tvs", { method: "POST", body: { acao: "adicionar", codigo: $("codigo").value, nome: $("nome-nova").value } });
+    $("dlg-adicionar").close();
+    await carregarTvs();
+    await abrirTv(tv.id);
+  } catch (err) { $("erro-adicionar").textContent = err.message; }
+});
+
+// opções da TV
+$("opcoes-tv").addEventListener("click", () => {
+  const tv = tvs.find((t) => t.id === atual);
+  if (!tv) return;
+  $("renomear").value = tv.nome;
+  const r = String(tv.rotacao || 0);
+  document.querySelectorAll("#giros input").forEach((i) => { i.checked = i.value === r; });
+  $("erro-opcoes").textContent = "";
+  $("dlg-opcoes").showModal();
+});
+$("form-opcoes").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const rotacao = Number((document.querySelector("#giros input:checked") || {}).value || 0);
+    await api("/api/tvs", { method: "POST", body: { acao: "configurar", tv: atual, nome: $("renomear").value, rotacao } });
+    $("dlg-opcoes").close();
+    carregarTvs();
+  } catch (err) { $("erro-opcoes").textContent = err.message; }
+});
+$("remover-tv").addEventListener("click", async () => {
+  const tv = tvs.find((t) => t.id === atual);
+  if (!tv || !confirm(`Remover "${tv.nome}"? A TV é desconectada e a playlist dela é apagada.`)) return;
+  try {
+    await api("/api/tvs", { method: "POST", body: { acao: "remover", tv: atual } });
+    $("dlg-opcoes").close();
+    atual = null;
+    carregarTvs();
+  } catch (err) { $("erro-opcoes").textContent = err.message; }
+});
+
+document.querySelectorAll("[data-fechar]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+
+// ---------------- playlist ----------------
 
 let salvando = null;
 function salvarDepois() {
   clearTimeout(salvando);
+  const tv = atual;
   salvando = setTimeout(async () => {
     try {
-      playlist = await api("/api/playlist", {
+      const p = await api("/api/playlist", {
         method: "POST",
-        body: { acao: "salvar", itens: playlist.itens.map(({ id, nome, duracao, som, ativo }) => ({ id, nome, duracao, som, ativo })) },
+        body: { tv, acao: "salvar", itens: playlist.itens.map(({ id, nome, duracao, som, ativo }) => ({ id, nome, duracao, som, ativo })) },
       });
+      if (tv === atual) playlist = p;
     } catch (e) { if (e.message !== "sessão") alert("Não salvou: " + e.message); }
   }, 500);
   desenharLista();
@@ -76,34 +209,38 @@ function mb(bytes) {
   return bytes > 1048576 ? (bytes / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.round(bytes / 1024) + " KB";
 }
 
+function escapar(t) {
+  return String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function desenharLista() {
   const ol = $("itens");
   ol.innerHTML = "";
   const ativos = playlist.itens.filter((i) => i.ativo);
-  $("resumo").textContent = playlist.itens.length
-    ? `${ativos.length} de ${playlist.itens.length} passando` : "";
+  $("resumo").textContent = playlist.itens.length ? `${ativos.length} de ${playlist.itens.length} no ar` : "";
   if (!playlist.itens.length) {
-    ol.innerHTML = '<li class="lista-vazia">Nenhum item ainda. Envie a primeira foto ou vídeo acima.</li>';
+    ol.innerHTML = '<li class="lista-vazia">Playlist vazia. Envie a primeira foto ou vídeo acima.</li>';
     return;
   }
+  const outras = tvs.length > 1;
   playlist.itens.forEach((it, idx) => {
     const li = document.createElement("li");
     li.className = "item" + (it.ativo ? "" : " pausado");
     li.draggable = true;
     li.dataset.idx = idx;
-
     const mini = it.tipo === "video"
       ? `<video class="miniatura" src="${it.url}#t=1" muted preload="metadata"></video>`
       : `<img class="miniatura" src="${it.url}" alt="" loading="lazy">`;
     const ajuste = it.tipo === "video"
       ? `<label><input type="checkbox" data-campo="som" ${it.som ? "checked" : ""}> com som</label>`
-      : `<label><input type="number" min="3" max="600" value="${it.duracao}" data-campo="duracao"> s na tela</label>`;
+      : `<label><input type="number" min="3" max="600" value="${it.duracao}" data-campo="duracao"> s</label>`;
     li.innerHTML = `
       <span class="alca" title="Arraste para reordenar">⠿</span>
       ${mini}
       <div class="info">
         <div class="nome" title="${escapar(it.nome)}">${escapar(it.nome)}</div>
         <div class="detalhes">
+          <span class="tag ar" hidden>NO AR</span>
           <span class="tag ${it.tipo}">${it.tipo === "video" ? "VÍDEO" : "FOTO"}</span>
           ${ajuste}
           <span>${mb(it.bytes || 0)}</span>
@@ -112,15 +249,13 @@ function desenharLista() {
       <div class="acoes">
         <button data-acao="subir" title="Subir">↑</button>
         <button data-acao="descer" title="Descer">↓</button>
-        <button data-acao="ativo" title="${it.ativo ? "Pausar" : "Voltar a passar"}">${it.ativo ? "⏸" : "▶"}</button>
+        ${outras ? '<button data-acao="copiar" title="Copiar para outras TVs">⧉</button>' : ""}
+        <button data-acao="ativo" title="${it.ativo ? "Pausar" : "Voltar ao ar"}">${it.ativo ? "⏸" : "▶"}</button>
         <button data-acao="apagar" class="apagar" title="Apagar">✕</button>
       </div>`;
     ol.appendChild(li);
   });
-}
-
-function escapar(t) {
-  return String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  desenharStatus();
 }
 
 $("itens").addEventListener("change", (e) => {
@@ -132,6 +267,7 @@ $("itens").addEventListener("change", (e) => {
   salvarDepois();
 });
 
+let copiando = null;
 $("itens").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-acao]");
   if (!b) return;
@@ -141,14 +277,30 @@ $("itens").addEventListener("click", async (e) => {
   if (acao === "subir" && idx > 0) mover(idx, idx - 1);
   else if (acao === "descer" && idx < playlist.itens.length - 1) mover(idx, idx + 1);
   else if (acao === "ativo") { it.ativo = !it.ativo; salvarDepois(); }
-  else if (acao === "apagar") {
-    if (!confirm(`Apagar "${it.nome}"? O arquivo sai da TV e do armazenamento.`)) return;
+  else if (acao === "copiar") {
+    copiando = it;
+    $("copiar-nome").textContent = it.nome;
+    $("copiar-tvs").innerHTML = tvs.filter((t) => t.id !== atual)
+      .map((t) => `<label><input type="checkbox" value="${t.id}"> ${escapar(t.nome)}</label>`).join("");
+    $("dlg-copiar").showModal();
+  } else if (acao === "apagar") {
+    if (!confirm(`Apagar "${it.nome}" desta TV?`)) return;
     try {
-      playlist = await api("/api/playlist", { method: "POST", body: { acao: "apagar", id: it.id } });
+      playlist = await playlistApi({ acao: "apagar", id: it.id });
       desenharLista();
       reiniciarPrevia();
     } catch (err) { if (err.message !== "sessão") alert(err.message); }
   }
+});
+
+$("form-copiar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const para = [...document.querySelectorAll("#copiar-tvs input:checked")].map((i) => i.value);
+  if (copiando && para.length) {
+    try { await playlistApi({ acao: "copiar", id: copiando.id, para }); }
+    catch (err) { if (err.message !== "sessão") alert(err.message); }
+  }
+  $("dlg-copiar").close();
 });
 
 function mover(de, para) {
@@ -203,42 +355,41 @@ envio.addEventListener("drop", (e) => {
 });
 
 async function enviar(arquivos) {
-  const barra = $("progresso");
+  const barra = $("progresso"), titulo = envio.querySelector("strong");
+  const tv = atual, nomeTv = (tvs.find((t) => t.id === tv) || {}).nome || "esta TV";
   for (const [n, f] of arquivos.entries()) {
     if (!TIPOS.includes(f.type)) { alert(`"${f.name}": só JPG, PNG, WebP ou vídeo MP4.`); continue; }
     if (f.size > MAX) { alert(`"${f.name}" tem ${mb(f.size)}. O limite é 60 MB.`); continue; }
     barra.hidden = false;
-    const titulo = envio.querySelector("strong");
     titulo.textContent = `Enviando ${n + 1} de ${arquivos.length}: ${f.name}`;
     try {
-      const nome = f.name.replace(/[^\w.\-]+/g, "-").toLowerCase();
-      // carregada só aqui: se o CDN falhar, o resto do painel continua funcionando
+      // carregada só aqui: se o CDN falhar, o resto do gestor continua funcionando
       const { upload } = await import("https://cdn.jsdelivr.net/npm/@vercel/blob@2.8.1/client/+esm");
-      const blob = await upload("podcast/" + nome, f, {
+      const nome = f.name.replace(/[^\w.\-]+/g, "-").toLowerCase();
+      const blob = await upload("estudio/" + nome, f, {
         access: "public",
         handleUploadUrl: "/api/upload",
         contentType: f.type,
         multipart: f.size > 8 * 1024 * 1024,
         onUploadProgress: (p) => { barra.firstElementChild.style.width = p.percentage + "%"; },
       });
-      playlist = await api("/api/playlist", {
+      const p = await api("/api/playlist", {
         method: "POST",
-        body: { acao: "adicionar", item: { url: blob.url, pathname: blob.pathname, contentType: f.type, nome: f.name.replace(/\.[^.]+$/, ""), bytes: f.size } },
+        body: { tv, acao: "adicionar", item: { url: blob.url, pathname: blob.pathname, contentType: f.type, nome: f.name.replace(/\.[^.]+$/, ""), bytes: f.size } },
       });
-      desenharLista();
-      reiniciarPrevia();
+      if (tv === atual) { playlist = p; desenharLista(); reiniciarPrevia(); }
     } catch (e) {
       if (e.message !== "sessão") alert(`Não consegui enviar "${f.name}": ${e.message}`);
     }
   }
   barra.hidden = true;
   barra.firstElementChild.style.width = "0";
-  envio.querySelector("strong").textContent = "Enviar fotos ou vídeos";
+  titulo.innerHTML = `Enviar para <span id="envio-tv">${escapar(nomeTv)}</span>`;
 }
 
 // ---------------- prévia (mesma ordem e tempos da TV, sem som) ----------------
 
-let previaPos = -1, previaTimer = null;
+let previaPos = -1, previaTimer = null, relogio = null, inicioItem = 0;
 
 function reiniciarPrevia() {
   clearTimeout(previaTimer);
@@ -250,9 +401,18 @@ function proximaPrevia() {
   clearTimeout(previaTimer);
   const tela = $("previa");
   const ativos = playlist.itens.filter((i) => i.ativo);
-  if (!ativos.length) { tela.innerHTML = '<div class="vazio">Nada passando: a playlist está vazia ou pausada</div>'; return; }
+  if (!ativos.length) {
+    tela.innerHTML = '<div class="vazio">Nada no ar</div>';
+    $("previa-nome").textContent = "—";
+    $("previa-pos").textContent = "";
+    $("tc").textContent = "00:00";
+    return;
+  }
   previaPos = (previaPos + 1) % ativos.length;
   const it = ativos[previaPos];
+  $("previa-nome").textContent = it.nome;
+  $("previa-pos").textContent = `${previaPos + 1}/${ativos.length}`;
+  inicioItem = Date.now();
   if (it.tipo === "video") {
     const v = document.createElement("video");
     v.src = it.url; v.muted = true; v.autoplay = true; v.playsInline = true;
@@ -268,29 +428,11 @@ function proximaPrevia() {
   }
 }
 
-// ---------------- status da TV ----------------
-
-async function atualizarStatus() {
-  try { statusTv = await api("/api/tv?status=1"); } catch { return; }
-  const pilula = $("status-pilula"), txt = $("status-texto");
-  if (!statusTv) {
-    pilula.className = "pilula off"; pilula.textContent = "TV offline";
-    txt.textContent = "A TV ainda não deu sinal. Confira se ela está ligada, na internet e com o app aberto.";
-    return;
-  }
-  const seg = Math.round((Date.now() - statusTv.em) / 1000);
-  const online = seg < 90;
-  pilula.className = "pilula " + (online ? "on" : "off");
-  pilula.textContent = online ? "TV online" : "TV offline";
-  const item = playlist.itens.find((i) => i.id === statusTv.item);
-  const quando = seg < 60 ? `há ${seg} s` : seg < 3600 ? `há ${Math.round(seg / 60)} min` : "há mais de 1 h";
-  const partes = [];
-  partes.push(online && item ? `Agora na TV: <strong>${escapar(item.nome)}</strong>` : online ? "TV ligada, sem item tocando" : `Último sinal ${quando}`);
-  if (online) partes.push(`último sinal ${quando}`);
-  if (statusTv.versao && statusTv.versao < playlist.versao) partes.push("atualizando a playlist…");
-  if (statusTv.baixando) partes.push(`baixando ${statusTv.baixando} arquivo${statusTv.baixando > 1 ? "s" : ""}`);
-  if (statusTv.livreMb) partes.push(`${(statusTv.livreMb / 1024).toFixed(1).replace(".", ",")} GB livres na TV`);
-  txt.innerHTML = partes.join(" · ");
-}
+// contador do item na prévia (minutos:segundos)
+setInterval(() => {
+  if (!inicioItem) return;
+  const s = Math.floor((Date.now() - inicioItem) / 1000);
+  $("tc").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}, 250);
 
 iniciar();
