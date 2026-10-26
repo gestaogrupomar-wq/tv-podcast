@@ -53,9 +53,17 @@ public class Player extends Activity {
   private File arqConexao;
 
   private FrameLayout raiz, palco;
-  private TextureView video;
-  private Surface superficie;
-  private MediaPlayer mp;
+  /** Uma camada de vídeo: TextureView + o player que desenha nela. São duas, para o próximo
+   *  vídeo carregar escondido atrás do atual e entrar sem corte. */
+  private static final class Camada {
+    TextureView tv;
+    Surface sup;
+    MediaPlayer mp;
+    String id;
+    boolean carregado, querTocar, comecou, tentouDeNovo;
+  }
+  private final Camada[] cam = {new Camada(), new Camada()};
+  private int frente; // camada que está no ar
   private ImageView fotoA, fotoB;
   private boolean fotoAFrente = true;
   private View telaCodigo, telaVazia;
@@ -85,22 +93,25 @@ public class Player extends Activity {
     palco = new FrameLayout(this);
     raiz.addView(palco);
 
-    video = new TextureView(this);
-    video.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-      @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
-        superficie = new Surface(st);
-        if (atual != null && atual.video()) tocarVideo(atual);
-      }
-      @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
-      @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
-        pararVideo();
-        if (superficie != null) superficie.release();
-        superficie = null;
-        return true;
-      }
-      @Override public void onSurfaceTextureUpdated(SurfaceTexture st) { }
-    });
-    palco.addView(video, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+    for (int n = 0; n < 2; n++) {
+      final Camada c = cam[n];
+      c.tv = new TextureView(this);
+      c.tv.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+        @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
+          c.sup = new Surface(st);
+          if (atual != null && atual.video() && tocandoVideo() == null) tocarVideo(atual);
+        }
+        @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
+        @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
+          soltar(c);
+          if (c.sup != null) c.sup.release();
+          c.sup = null;
+          return true;
+        }
+        @Override public void onSurfaceTextureUpdated(SurfaceTexture st) { }
+      });
+      palco.addView(c.tv, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+    }
     fotoA = foto();
     fotoB = foto();
     palco.addView(fotoA, new FrameLayout.LayoutParams(-1, -1));
@@ -125,8 +136,8 @@ public class Player extends Activity {
   @Override protected void onStop() {
     super.onStop();
     ui.removeCallbacksAndMessages(null);
-    pararVideo();
-    descartarVideoPronto();
+    soltar(cam[0]);
+    soltar(cam[1]);
     tocando = false;
     pos = -1;
   }
@@ -199,7 +210,8 @@ public class Player extends Activity {
     midia.token = null;
     salvarConexao();
     ui.removeCallbacksAndMessages(null);
-    pararVideo();
+    soltar(cam[0]);
+    soltar(cam[1]);
     tocando = false;
     atual = null;
     fotoA.setImageDrawable(null);
@@ -352,10 +364,13 @@ public class Player extends Activity {
 
   // ================= reprodução =================
   //
-  // Troca é sempre corte seco e sem tela preta, e o trabalho pesado é feito ANTES da troca:
-  // enquanto um item passa, o seguinte já é preparado (foto aberta em segundo plano; vídeo
-  // carregado escondido atrás da foto 1,5 s antes do fim dela). Na hora da troca só se mostra.
-  // As fotos têm fundo preto e cobrem o vídeo inteiro; o vídeo fica sempre por baixo.
+  // Nenhuma troca pode aparecer: corte seco, sem tela preta e sem travada. O trabalho pesado é
+  // feito ANTES da troca, enquanto o item atual passa:
+  //  - próxima foto: aberta em segundo plano;
+  //  - próximo vídeo: carregado na camada de trás (a partir dos últimos 3 s do vídeo atual, ou
+  //    1,5 s antes do fim da foto). Na troca ele começa atrás e só vem para a frente quando o
+  //    primeiro quadro já está desenhado; até lá fica na tela o último quadro do anterior.
+  // As fotos têm fundo preto e cobrem os vídeos por inteiro.
 
   private final Runnable fimFoto = this::proximo;
   private long itemDesde;                                              // quando o item atual entrou
@@ -363,9 +378,11 @@ public class Player extends Activity {
   private final ExecutorService preparo = Executors.newSingleThreadExecutor();
   private volatile String fotoProntaId;
   private volatile Bitmap fotoPronta;
-  private MediaPlayer mpPronto;          // próximo vídeo, já carregado (não começou)
-  private String mpProntoId;
-  private boolean mpProntoCarregado;
+
+  private Camada atras() { return cam[1 - frente]; }
+
+  /** Player do vídeo que está no ar (ou null). */
+  private MediaPlayer tocandoVideo() { return cam[frente].comecou ? cam[frente].mp : null; }
 
   private void proximo() {
     ui.removeCallbacks(fimFoto);
@@ -375,8 +392,8 @@ public class Player extends Activity {
     if (lista.isEmpty()) {
       tocando = false;
       atual = null;
-      pararVideo();
-      descartarVideoPronto();
+      soltar(cam[0]);
+      soltar(cam[1]);
       descobrir();
       mostrarVazia();
       return;
@@ -384,26 +401,19 @@ public class Player extends Activity {
     if (telaVazia != null) telaVazia.setVisibility(View.GONE);
     tocando = true;
     pos = (pos + 1) % lista.size();
-    Midia.Item novo = lista.get(pos);
-    // vídeo → vídeo: congela o último quadro por cima até o novo ter imagem
-    if (novo.video() && mp != null) {
-      Bitmap quadro = video.getBitmap();
-      if (quadro != null) cobrir(quadro);
-    }
-    atual = novo;
+    atual = lista.get(pos);
     itemDesde = android.os.SystemClock.elapsedRealtime();
 
     if (atual.video()) {
-      tocarVideo(atual); // a cobertura sai quando o primeiro quadro do vídeo aparecer
+      tocarVideo(atual);
     } else {
       Bitmap bmp = atual.id.equals(fotoProntaId) ? fotoPronta : abrirFoto(atual);
       fotoProntaId = null;
       fotoPronta = null;
       if (bmp == null) { ui.postDelayed(this::proximo, 500); return; }
       cobrir(bmp);
-      pararVideo();
+      soltar(cam[frente]); // o vídeo que estava no ar (a foto já cobre)
       ui.postDelayed(fimFoto, atual.duracao * 1000L);
-      // próximo é vídeo: começa a carregar 1,5 s antes do fim da foto
       ui.postDelayed(preVideo, Math.max(0, atual.duracao * 1000L - 1500));
     }
     prepararFotoSeguinte(lista);
@@ -419,24 +429,118 @@ public class Player extends Activity {
     });
   }
 
+  /** Carrega o próximo vídeo na camada de trás (sem começar). */
   private final Runnable preVideo = () -> {
     List<Midia.Item> lista = midia.prontos();
-    if (lista.isEmpty() || superficie == null || mp != null) return;
+    if (lista.size() < 2) return;
     Midia.Item seg = lista.get((pos + 1) % lista.size());
-    if (!seg.video() || seg.id.equals(mpProntoId)) return;
-    descartarVideoPronto();
-    MediaPlayer p = criarPlayer(seg);
-    if (p == null) return;
-    mpPronto = p;
-    mpProntoId = seg.id;
-    mpProntoCarregado = false;
-    p.prepareAsync();
+    Camada c = atras();
+    if (!seg.video() || c.sup == null || seg.id.equals(c.id)) return;
+    carregar(c, seg, false);
   };
 
-  private void descartarVideoPronto() {
-    if (mpPronto != null) { try { mpPronto.release(); } catch (Exception ignored) { } }
-    mpPronto = null;
-    mpProntoId = null;
+  private void tocarVideo(Midia.Item it) {
+    Camada c = atras();
+    if (c.sup == null) return; // toca quando a superfície existir
+    if (c.mp != null && it.id.equals(c.id)) {
+      if (c.carregado) comecar(c);
+      else c.querTocar = true; // começa assim que terminar de carregar
+      return;
+    }
+    carregar(c, it, true);
+  }
+
+  private void carregar(Camada c, Midia.Item it, boolean tocarLogo) {
+    soltar(c);
+    try {
+      final MediaPlayer este = new MediaPlayer();
+      c.mp = este;
+      c.id = it.id;
+      c.querTocar = tocarLogo;
+      este.setSurface(c.sup);
+      este.setDataSource(it.arquivo.getAbsolutePath());
+      float v = it.som ? 1f : 0f;
+      este.setVolume(v, v);
+      este.setOnVideoSizeChangedListener((p, w, h) -> ajustar(c));
+      // sem setLooping: no fim de cada vídeo a playlist é conferida de novo (fotos podem ter
+      // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem corte.
+      este.setOnCompletionListener(p -> {
+        if (c.mp != este) return;
+        List<Midia.Item> prontos = midia.prontos();
+        if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) {
+          p.seekTo(0);
+          p.start();
+          itemDesde = android.os.SystemClock.elapsedRealtime();
+        } else proximo();
+      });
+      este.setOnErrorListener((p, a, b) -> {
+        if (c.mp != este) return true;
+        boolean queria = c.querTocar;
+        soltar(c);
+        if (queria) {
+          // a TV pode não ter decodificador livre para dois vídeos: solta o de frente (o último
+          // quadro dele continua na tela) e tenta uma vez de novo; se falhar, pula o item
+          if (!c.tentouDeNovo && cam[frente].mp != null) {
+            soltar(cam[frente]);
+            c.tentouDeNovo = true;
+            carregar(c, it, true);
+            c.tentouDeNovo = true;
+          } else ui.postDelayed(this::proximo, 500);
+        }
+        return true;
+      });
+      este.setOnInfoListener((p, oque, extra) -> {
+        if (oque == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && c.mp == este && c.comecou) paraFrente(c);
+        return false;
+      });
+      este.setOnPreparedListener(p -> {
+        if (c.mp != este) return;
+        if (p.getDuration() > 0) duracoes.put(it.id, (long) p.getDuration());
+        c.carregado = true;
+        ajustar(c);
+        if (c.querTocar) comecar(c);
+      });
+      este.prepareAsync();
+    } catch (Exception e) {
+      soltar(c);
+      if (tocarLogo) ui.postDelayed(this::proximo, 1000);
+    }
+  }
+
+  private void comecar(Camada c) {
+    c.comecou = true;
+    c.querTocar = false;
+    itemDesde = android.os.SystemClock.elapsedRealtime();
+    c.mp.start();
+    final MediaPlayer este = c.mp;
+    // segurança: se a TV não avisar o primeiro quadro, traz para a frente logo depois
+    ui.postDelayed(() -> { if (c.mp == este) paraFrente(c); }, 800);
+  }
+
+  /** O vídeo novo já tem imagem: vem para a frente e o anterior é solto. */
+  private void paraFrente(Camada c) {
+    int n = c == cam[0] ? 0 : 1;
+    if (frente == n && cam[frente].tv.getAlpha() == 1f && fotoA.getAlpha() == 0f && fotoB.getAlpha() == 0f) return;
+    Camada velha = cam[frente];
+    frente = n;
+    c.tv.setAlpha(1f);
+    c.tv.bringToFront();
+    descobrir();
+    if (velha != c) soltar(velha);
+    // o vídeo seguinte começa a carregar atrás nos últimos 3 s deste
+    Long dur = duracoes.get(c.id);
+    ui.removeCallbacks(preVideo);
+    if (dur != null) ui.postDelayed(preVideo, Math.max(0, dur - 3000));
+  }
+
+  private void soltar(Camada c) {
+    if (c.mp != null) {
+      try { c.mp.stop(); } catch (Exception ignored) { }
+      try { c.mp.release(); } catch (Exception ignored) { }
+    }
+    c.mp = null;
+    c.id = null;
+    c.carregado = c.querTocar = c.comecou = c.tentouDeNovo = false;
   }
 
   /** Põe a imagem por cima de tudo, na hora, e solta a anterior. */
@@ -458,91 +562,20 @@ public class Player extends Activity {
     }
   }
 
-  /** Vídeo num TextureView (que gira junto com o palco, ao contrário do VideoView). */
-  private void tocarVideo(Midia.Item it) {
-    if (superficie == null) return; // toca quando a superfície existir
-    if (mpPronto != null && it.id.equals(mpProntoId)) {
-      // já carregado atrás da foto: só começa
-      pararVideo();
-      mp = mpPronto;
-      boolean carregado = mpProntoCarregado;
-      mpPronto = null;
-      mpProntoId = null;
-      if (carregado) comecar(mp);
-      return; // se ainda carrega, começa no onPrepared
-    }
-    pararVideo();
-    descartarVideoPronto();
-    MediaPlayer p = criarPlayer(it);
-    if (p == null) { ui.postDelayed(this::proximo, 1000); return; }
-    mp = p;
-    p.prepareAsync();
-  }
-
-  private MediaPlayer criarPlayer(Midia.Item it) {
-    try {
-      final MediaPlayer este = new MediaPlayer();
-      este.setSurface(superficie);
-      este.setDataSource(it.arquivo.getAbsolutePath());
-      float v = it.som ? 1f : 0f;
-      este.setVolume(v, v);
-      este.setOnVideoSizeChangedListener((p, w, h) -> { if (mp == este) ajustarVideo(); });
-      // sem setLooping: no fim de cada vídeo a playlist é conferida de novo (fotos podem ter
-      // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem corte.
-      este.setOnCompletionListener(p -> {
-        List<Midia.Item> prontos = midia.prontos();
-        if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) {
-          p.seekTo(0);
-          p.start();
-          itemDesde = android.os.SystemClock.elapsedRealtime();
-        }
-        else proximo();
-      });
-      este.setOnErrorListener((p, a, b) -> {
-        if (mp == este) ui.postDelayed(this::proximo, 1000);
-        else if (mpPronto == este) descartarVideoPronto();
-        return true;
-      });
-      este.setOnInfoListener((p, oque, extra) -> {
-        if (oque == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && mp == este) descobrir();
-        return false;
-      });
-      este.setOnPreparedListener(p -> {
-        if (p.getDuration() > 0) duracoes.put(it.id, (long) p.getDuration());
-        if (mp == este) comecar(este);
-        else if (mpPronto == este) mpProntoCarregado = true;
-      });
-      return este;
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  private void comecar(MediaPlayer este) {
-    itemDesde = android.os.SystemClock.elapsedRealtime();
-    ajustarVideo();
-    este.start();
-    // segurança: se a TV não avisar o primeiro quadro, descobre logo depois
-    ui.postDelayed(() -> { if (mp == este) descobrir(); }, 1200);
-  }
-
-  private void pararVideo() {
-    if (mp != null) {
-      try { mp.stop(); } catch (Exception ignored) { }
-      mp.release();
-      mp = null;
-    }
+  private void ajustarVideo() {
+    ajustar(cam[0]);
+    ajustar(cam[1]);
   }
 
   /** Encaixa o vídeo no palco sem distorcer (com faixas pretas se a proporção for outra). */
-  private void ajustarVideo() {
-    if (mp == null || palco.getLayoutParams() == null) return;
+  private void ajustar(Camada c) {
+    if (c.mp == null || palco.getLayoutParams() == null) return;
     int vw, vh;
-    try { vw = mp.getVideoWidth(); vh = mp.getVideoHeight(); } catch (Exception e) { return; }
+    try { vw = c.mp.getVideoWidth(); vh = c.mp.getVideoHeight(); } catch (Exception e) { return; }
     if (vw <= 0 || vh <= 0) return;
     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) palco.getLayoutParams();
     float escala = Math.min((float) lp.width / vw, (float) lp.height / vh);
-    video.setLayoutParams(new FrameLayout.LayoutParams(Math.round(vw * escala), Math.round(vh * escala), Gravity.CENTER));
+    c.tv.setLayoutParams(new FrameLayout.LayoutParams(Math.round(vw * escala), Math.round(vh * escala), Gravity.CENTER));
   }
 
   /** Abre a foto já reduzida ao tamanho da tela (a TV tem pouca memória). */
