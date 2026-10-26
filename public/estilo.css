@@ -1,4 +1,4 @@
-/* Gestor da TV do Estúdio — vidro escuro (estilo Apple) */
+/* Gestor de Telas — vidro escuro (estilo Apple) */
 :root {
   --texto: rgba(255,255,255,.94); --suave: rgba(235,235,245,.62); --fraco: rgba(235,235,245,.38);
   --vidro: rgba(255,255,255,.07); --vidro-2: rgba(255,255,255,.11); --vidro-3: rgba(255,255,255,.16);
@@ -110,8 +110,7 @@ input[type=checkbox] { accent-color: var(--azul); }
   .tvs { order: 5; flex-basis: 100%; }
 }
 
-.monitor { padding: 14px; position: sticky; top: 92px; align-self: start; }
-@media (max-width: 960px) { .monitor { position: static; } }
+.monitor { padding: 14px; align-self: start; }
 .monitor-topo, .monitor-base { display: flex; align-items: center; gap: 12px; padding: 2px 6px 12px; }
 .monitor-topo .rotulo:first-child { flex: 1; color: var(--texto); font-size: 15px; }
 .monitor-base { padding: 12px 6px 2px; }
