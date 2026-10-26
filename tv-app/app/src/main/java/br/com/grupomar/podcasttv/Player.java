@@ -521,7 +521,7 @@ public class Player extends Activity {
 
   private void atualizarVazia() {
     if (vazioNome == null) return;
-    vazioNome.setText(midia.nome.isEmpty() ? "TV do Estúdio" : midia.nome);
+    vazioNome.setText(midia.nome.isEmpty() ? "Gestor de Telas" : midia.nome);
     if (baixando > 0) vazioStatus.setText("Baixando " + baixando + (baixando == 1 ? " arquivo…" : " arquivos…"));
     else if (!midia.itens.isEmpty() && midia.prontos().isEmpty()) vazioStatus.setText("Sem espaço livre na TV para os arquivos");
     else vazioStatus.setText("");
