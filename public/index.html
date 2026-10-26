@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TV do Podcast — Grupo Mar</title>
+<link rel="icon" href="grupomar.png">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<!-- entrada -->
+<section id="entrar" class="entrar" hidden>
+  <form class="vidro cartao-entrar" id="form-entrar">
+    <img src="grupomar.png" alt="Grupo Mar" class="logo-entrar">
+    <h1>TV do Podcast</h1>
+    <p>Entre com a senha do painel.</p>
+    <input type="password" id="senha" placeholder="Senha" autocomplete="current-password" required>
+    <button type="submit" class="botao">Entrar</button>
+    <div class="erro" id="erro-entrar"></div>
+  </form>
+</section>
+
+<!-- painel -->
+<section id="painel" hidden>
+  <header class="topo">
+    <img src="grupomar.png" alt="Grupo Mar" class="logo">
+    <div class="titulo">
+      <h1>TV do Podcast</h1>
+      <span id="status-pilula" class="pilula off">TV offline</span>
+    </div>
+    <button class="link" id="sair">Sair</button>
+  </header>
+
+  <main class="grade">
+    <div class="coluna-tv">
+      <div class="tv">
+        <div class="tela" id="previa"><div class="vazio">A playlist está vazia</div></div>
+        <div class="pe"></div>
+      </div>
+      <div class="vidro status" id="status-texto">Procurando a TV…</div>
+    </div>
+
+    <div class="coluna-lista">
+      <label class="vidro envio" id="envio">
+        <input type="file" id="arquivos" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden>
+        <strong>Enviar fotos ou vídeos</strong>
+        <span>Clique ou arraste aqui · JPG, PNG, WebP ou MP4 · até 60 MB cada</span>
+        <div class="progresso" id="progresso" hidden><div></div></div>
+      </label>
+
+      <div class="vidro lista">
+        <div class="lista-topo">
+          <h2>Playlist</h2>
+          <span id="resumo"></span>
+        </div>
+        <ol id="itens"></ol>
+        <p class="dica">Arraste ⠿ para mudar a ordem. Itens pausados não passam na TV.</p>
+      </div>
+    </div>
+  </main>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

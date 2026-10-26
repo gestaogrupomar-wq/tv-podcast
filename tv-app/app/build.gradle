@@ -1,0 +1,48 @@
+plugins { id "com.android.application" }
+
+// Chave de assinatura fica FORA do git (chave-podcast.jks + chave.properties). Sem ela as
+// próximas versões não instalam por cima da que está na TV.
+def chave = rootProject.file("chave-podcast.jks")
+def props = new Properties()
+def arqSenha = rootProject.file("chave.properties")
+if (arqSenha.exists()) arqSenha.withInputStream { props.load(it) }
+def senha = props.getProperty("senha", "")
+
+android {
+  namespace "br.com.grupomar.podcasttv"
+  compileSdk 35
+
+  defaultConfig {
+    applicationId "br.com.grupomar.podcasttv"
+    minSdk 22
+    targetSdk 34
+    versionCode 1
+    versionName "1.0"
+  }
+
+  signingConfigs {
+    if (chave.exists() && senha) {
+      local {
+        storeFile chave
+        storePassword senha
+        keyAlias "podcast"
+        keyPassword senha
+      }
+    }
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      if (chave.exists() && senha) signingConfig signingConfigs.local
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+}

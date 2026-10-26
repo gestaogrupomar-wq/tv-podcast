@@ -1,0 +1,115 @@
+:root {
+  --tinta: #141b2a; --suave: rgba(20,27,42,.65); --fraco: rgba(20,27,42,.45); --linha: rgba(20,27,42,.10);
+  --laranja: #f7a11a; --laranja-texto: #c87300; --verde: #5e9f24; --vermelho: #d33a2c; --azul: #00669b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh; color: var(--tinta);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(45vmax 45vmax at -5% 75%, rgba(247,161,26,.35), transparent 70%),
+    radial-gradient(45vmax 45vmax at 105% 105%, rgba(0,102,155,.30), transparent 70%),
+    linear-gradient(#f2f4f8, #e2e7ef);
+  background-attachment: fixed;
+}
+[hidden] { display: none !important; }
+h1, h2 { margin: 0; letter-spacing: -.01em; }
+button, input { font: inherit; color: inherit; }
+
+.vidro {
+  background: linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.7));
+  border: 1px solid rgba(255,255,255,.95); border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(20,27,42,.08);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.botao {
+  background: var(--tinta); color: #fff; border: 0; border-radius: 12px;
+  padding: 12px 18px; font-weight: 600; cursor: pointer;
+}
+.link { background: none; border: 0; color: var(--suave); cursor: pointer; padding: 8px; }
+.link:hover { color: var(--tinta); }
+
+/* entrada */
+.entrar { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.cartao-entrar { width: 100%; max-width: 360px; padding: 32px 28px; display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.logo-entrar { height: 64px; align-self: center; margin-bottom: 4px; }
+.cartao-entrar p { margin: 0 0 6px; color: var(--suave); }
+.cartao-entrar input { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--linha); background: #fff; }
+.erro { color: var(--vermelho); min-height: 1.4em; font-size: 14px; }
+
+/* topo */
+.topo { display: flex; align-items: center; gap: 16px; padding: 20px 24px 8px; max-width: 1240px; margin: 0 auto; }
+.topo .logo { height: 44px; }
+.titulo { flex: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.titulo h1 { font-size: 22px; font-weight: 600; }
+.pilula { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+.pilula.on { background: rgba(94,159,36,.14); color: var(--verde); }
+.pilula.off { background: rgba(211,58,44,.12); color: var(--vermelho); }
+
+/* grade */
+.grade { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; padding: 12px 24px 32px; max-width: 1240px; margin: 0 auto; }
+@media (max-width: 900px) { .grade { grid-template-columns: 1fr; padding: 12px 16px 28px; } .topo { padding: 16px 16px 4px; } }
+
+/* TV desenhada */
+.tv { position: sticky; top: 16px; }
+.tela {
+  aspect-ratio: 16 / 9; background: #05070d; border-radius: 14px; overflow: hidden; position: relative;
+  border: 10px solid #1a1d24; box-shadow: 0 20px 50px rgba(20,27,42,.30);
+}
+.tela img, .tela video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.tela .vazio { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.5); }
+.pe { width: 22%; height: 10px; margin: 0 auto; background: #1a1d24; border-radius: 0 0 8px 8px; }
+.status { margin-top: 16px; padding: 14px 18px; color: var(--suave); font-size: 14px; }
+.status strong { color: var(--tinta); }
+
+/* envio */
+.envio {
+  display: flex; flex-direction: column; gap: 4px; padding: 22px; cursor: pointer; text-align: center;
+  border: 1.5px dashed rgba(20,27,42,.22);
+}
+.envio.arrastando { border-color: var(--laranja); background: rgba(255,247,232,.9); }
+.envio span { color: var(--fraco); font-size: 13px; }
+.progresso { height: 6px; border-radius: 6px; background: var(--linha); margin-top: 10px; overflow: hidden; }
+.progresso div { height: 100%; width: 0; background: var(--laranja); transition: width .2s; }
+
+/* lista */
+.lista { margin-top: 16px; padding: 18px 18px 12px; }
+.lista-topo { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.lista-topo h2 { font-size: 17px; font-weight: 600; }
+.lista-topo span { color: var(--fraco); font-size: 13px; }
+ol { list-style: none; margin: 0; padding: 0; }
+.item {
+  display: grid; grid-template-columns: 22px 64px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 6px; border-top: 1px solid var(--linha); background: transparent;
+}
+.item:first-child { border-top: 0; }
+.item.pausado .miniatura, .item.pausado .nome { opacity: .4; }
+.item.arrastado { opacity: .4; }
+.item.alvo { box-shadow: inset 0 2px 0 var(--laranja); }
+.alca { cursor: grab; color: var(--fraco); text-align: center; user-select: none; font-size: 18px; }
+.miniatura { width: 64px; aspect-ratio: 16 / 9; border-radius: 8px; object-fit: cover; background: #000; display: block; }
+.info { min-width: 0; }
+.nome { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detalhes { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--suave); margin-top: 4px; align-items: center; }
+.detalhes input[type=number] { width: 56px; padding: 3px 6px; border: 1px solid var(--linha); border-radius: 8px; background: #fff; }
+.detalhes label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.tag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(0,102,155,.12); color: var(--azul); }
+.tag.foto { background: rgba(247,161,26,.16); color: var(--laranja-texto); }
+.acoes { display: flex; gap: 2px; }
+.acoes button { background: none; border: 0; cursor: pointer; padding: 6px 7px; border-radius: 8px; color: var(--suave); font-size: 15px; }
+.acoes button:hover { background: rgba(20,27,42,.06); color: var(--tinta); }
+.acoes .apagar:hover { color: var(--vermelho); }
+.dica { color: var(--fraco); font-size: 12px; margin: 10px 4px 2px; }
+
+/* celular: TV não fica presa no topo e os botões descem para baixo do item */
+@media (max-width: 900px) {
+  .tv { position: static; }
+}
+@media (max-width: 560px) {
+  .item { grid-template-columns: 22px 72px minmax(0, 1fr); }
+  .miniatura { width: 72px; }
+  .acoes { grid-column: 2 / -1; justify-content: flex-start; margin-top: -2px; }
+  .acoes button { padding: 6px 12px; background: rgba(20,27,42,.05); }
+}
+.lista-vazia { color: var(--fraco); padding: 16px 6px; }

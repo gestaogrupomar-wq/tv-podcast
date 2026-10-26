@@ -1,0 +1,14 @@
+{
+  "name": "tv-podcast",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@vercel/blob": "2.8.1"
+  },
+  "private": true
+}

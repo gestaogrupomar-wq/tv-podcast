@@ -1,0 +1,8 @@
+node_modules/
+.vercel/
+tv-app/build/
+tv-app/app/build/
+tv-app/.gradle/
+tv-app/local.properties
+tv-app/chave-podcast.jks
+tv-app/chave.properties
