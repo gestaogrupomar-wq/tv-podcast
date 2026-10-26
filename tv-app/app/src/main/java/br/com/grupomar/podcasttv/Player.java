@@ -43,7 +43,7 @@ import java.util.concurrent.Executors;
  * que gira quando a TV está presa em pé (rotação escolhida no gestor).
  */
 public class Player extends Activity {
-  private static final long SINCRONIA = 30_000, STATUS = 30_000, FADE = 600, PAREAR = 3_000;
+  private static final long SINCRONIA = 30_000, STATUS = 30_000, PAREAR = 3_000;
   private static final String LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -343,6 +343,9 @@ public class Player extends Activity {
 
   private final Runnable fimFoto = this::proximo;
 
+  // Troca é sempre corte seco e sem tela preta: o que está no ar continua na tela (foto ou o
+  // último quadro congelado do vídeo) até o próximo item já ter imagem para mostrar.
+
   private void proximo() {
     ui.removeCallbacks(fimFoto);
     if (midia.token == null) return;
@@ -351,34 +354,47 @@ public class Player extends Activity {
       tocando = false;
       atual = null;
       pararVideo();
-      fotoA.setImageDrawable(null);
-      fotoB.setImageDrawable(null);
+      descobrir();
       mostrarVazia();
       return;
     }
     if (telaVazia != null) telaVazia.setVisibility(View.GONE);
     tocando = true;
+    // saindo de um vídeo: congela o último quadro por cima antes de trocar
+    if (mp != null && video.getVisibility() == View.VISIBLE) {
+      Bitmap quadro = video.getBitmap();
+      if (quadro != null) cobrir(quadro);
+    }
     pos = (pos + 1) % lista.size();
     atual = lista.get(pos);
 
     if (atual.video()) {
-      fotoA.animate().alpha(0f).setDuration(FADE).start();
-      fotoB.animate().alpha(0f).setDuration(FADE).start();
-      tocarVideo(atual);
+      tocarVideo(atual); // a cobertura sai quando o primeiro quadro do vídeo aparecer
     } else {
       Bitmap bmp = abrirFoto(atual);
       if (bmp == null) { ui.postDelayed(this::proximo, 500); return; }
-      ImageView entra = fotoAFrente ? fotoB : fotoA, sai = fotoAFrente ? fotoA : fotoB;
-      fotoAFrente = !fotoAFrente;
-      entra.setImageBitmap(bmp);
-      entra.bringToFront();
-      entra.setAlpha(0f);
-      entra.animate().alpha(1f).setDuration(FADE).withEndAction(() -> {
-        sai.setImageDrawable(null); // solta a foto anterior
-        sai.setAlpha(0f);
-        pararVideo();
-      }).start();
+      cobrir(bmp);
+      pararVideo();
       ui.postDelayed(fimFoto, atual.duracao * 1000L);
+    }
+  }
+
+  /** Põe a imagem por cima de tudo, na hora, e solta a anterior. */
+  private void cobrir(Bitmap bmp) {
+    ImageView entra = fotoAFrente ? fotoB : fotoA, sai = fotoAFrente ? fotoA : fotoB;
+    fotoAFrente = !fotoAFrente;
+    entra.setImageBitmap(bmp);
+    entra.setAlpha(1f);
+    entra.bringToFront();
+    sai.setImageDrawable(null);
+    sai.setAlpha(0f);
+  }
+
+  /** Tira as imagens de cima (o vídeo já está desenhando). */
+  private void descobrir() {
+    for (ImageView f : new ImageView[] {fotoA, fotoB}) {
+      f.setAlpha(0f);
+      f.setImageDrawable(null);
     }
   }
 
@@ -387,22 +403,33 @@ public class Player extends Activity {
     if (superficie == null) { video.setVisibility(View.VISIBLE); return; } // toca quando a superfície existir
     pararVideo();
     try {
-      mp = new MediaPlayer();
-      mp.setSurface(superficie);
-      mp.setDataSource(it.arquivo.getAbsolutePath());
+      final MediaPlayer este = new MediaPlayer();
+      mp = este;
+      este.setSurface(superficie);
+      este.setDataSource(it.arquivo.getAbsolutePath());
       float v = it.som ? 1f : 0f;
-      mp.setVolume(v, v);
-      mp.setOnVideoSizeChangedListener((p, w, h) -> ajustarVideo());
+      este.setVolume(v, v);
+      este.setOnVideoSizeChangedListener((p, w, h) -> ajustarVideo());
       // sem setLooping: no fim de cada vídeo a playlist é conferida de novo (fotos podem ter
-      // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem tela preta.
-      mp.setOnCompletionListener(p -> {
+      // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem corte.
+      este.setOnCompletionListener(p -> {
         List<Midia.Item> prontos = midia.prontos();
         if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) { p.seekTo(0); p.start(); }
         else proximo();
       });
-      mp.setOnErrorListener((p, a, b) -> { ui.postDelayed(this::proximo, 1000); return true; });
-      mp.setOnPreparedListener(p -> { ajustarVideo(); video.setVisibility(View.VISIBLE); p.start(); });
-      mp.prepareAsync();
+      este.setOnErrorListener((p, a, b) -> { ui.postDelayed(this::proximo, 1000); return true; });
+      este.setOnInfoListener((p, oque, extra) -> {
+        if (oque == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && mp == este) descobrir();
+        return false;
+      });
+      este.setOnPreparedListener(p -> {
+        ajustarVideo();
+        video.setVisibility(View.VISIBLE);
+        p.start();
+        // segurança: se a TV não avisar o primeiro quadro, descobre logo depois
+        ui.postDelayed(() -> { if (mp == este) descobrir(); }, 1200);
+      });
+      este.prepareAsync();
     } catch (Exception e) {
       ui.postDelayed(this::proximo, 1000);
     }
