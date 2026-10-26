@@ -214,7 +214,10 @@ public class Player extends Activity {
     telaCodigo.setVisibility(View.VISIBLE);
     telaCodigo.bringToFront();
     if (codigo == null || System.currentTimeMillis() - codigoDesde > 14 * 60_000L) novoCodigo();
-    else codigoTxt.setText(codigo.substring(0, 3) + " " + codigo.substring(3));
+    else {
+      codigoTxt.setText(codigo.substring(0, 3) + " " + codigo.substring(3));
+      codigoDica.setText("O código vale por 15 minutos · OK no controle gira a tela");
+    }
     ui.removeCallbacks(esperaPar);
     ui.postDelayed(esperaPar, PAREAR);
   }
