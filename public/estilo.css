@@ -13,15 +13,15 @@ body {
   min-height: 100vh; color: var(--texto); background: #07080c;
   font: 14px/1.45 var(--sistema); -webkit-font-smoothing: antialiased;
 }
-/* luzes do fundo (cores da marca), atrás do vidro */
+/* luzes do fundo (cores da marca), atrás do vidro. Sem filter: blur — o navegador desenha esse
+   desfoque em blocos e as emendas apareciam como faixas verticais atrás dos painéis. */
 body::before {
-  content: ""; position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(38% 42% at 18% 22%, rgba(255,159,10,.30), transparent 70%),
-    radial-gradient(34% 40% at 85% 12%, rgba(10,132,255,.26), transparent 70%),
-    radial-gradient(40% 45% at 70% 92%, rgba(48,209,88,.16), transparent 70%),
-    radial-gradient(30% 35% at 8% 90%, rgba(10,132,255,.18), transparent 70%);
-  filter: blur(40px);
+    radial-gradient(55% 60% at 15% 18%, rgba(255,159,10,.24), rgba(255,159,10,.08) 45%, transparent 75%),
+    radial-gradient(50% 55% at 88% 8%, rgba(10,132,255,.22), rgba(10,132,255,.07) 45%, transparent 75%),
+    radial-gradient(55% 60% at 72% 96%, rgba(48,209,88,.13), rgba(48,209,88,.04) 45%, transparent 75%),
+    radial-gradient(45% 50% at 5% 95%, rgba(10,132,255,.15), rgba(10,132,255,.05) 45%, transparent 75%);
 }
 [hidden] { display: none !important; }
 h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
