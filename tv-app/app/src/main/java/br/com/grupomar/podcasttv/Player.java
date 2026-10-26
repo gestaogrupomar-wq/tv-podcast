@@ -318,10 +318,21 @@ public class Player extends Activity {
       final String item = atual != null && tocando ? atual.id : "";
       final String token = midia.token;
       if (token == null) return;
+      // sequência com a duração de cada item: o gestor calcula sozinho o que está no ar a cada
+      // segundo, sem a TV precisar avisar a cada troca
+      final long decorrido = android.os.SystemClock.elapsedRealtime() - itemDesde;
+      final org.json.JSONArray seq = new org.json.JSONArray();
+      for (Midia.Item i : midia.prontos()) {
+        if (seq.length() >= 100) break;
+        Long d = i.video() ? duracoes.get(i.id) : Long.valueOf(i.duracao * 1000L);
+        seq.put(new org.json.JSONArray().put(i.id).put(d == null ? 0 : d));
+      }
       rede.execute(() -> {
         try {
           JSONObject j = new JSONObject();
           j.put("item", item);
+          j.put("decorrido", decorrido);
+          j.put("seq", seq);
           j.put("versao", midia.versao);
           j.put("app", versao());
           j.put("baixando", baixando);
@@ -342,6 +353,8 @@ public class Player extends Activity {
   // ================= reprodução =================
 
   private final Runnable fimFoto = this::proximo;
+  private long itemDesde;                                              // quando o item atual entrou
+  private final java.util.Map<String, Long> duracoes = new java.util.HashMap<>(); // vídeos (ms)
 
   // Troca é sempre corte seco e sem tela preta: o que está no ar continua na tela (foto ou o
   // último quadro congelado do vídeo) até o próximo item já ter imagem para mostrar.
@@ -367,6 +380,7 @@ public class Player extends Activity {
     }
     pos = (pos + 1) % lista.size();
     atual = lista.get(pos);
+    itemDesde = android.os.SystemClock.elapsedRealtime();
 
     if (atual.video()) {
       tocarVideo(atual); // a cobertura sai quando o primeiro quadro do vídeo aparecer
@@ -414,7 +428,11 @@ public class Player extends Activity {
       // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem corte.
       este.setOnCompletionListener(p -> {
         List<Midia.Item> prontos = midia.prontos();
-        if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) { p.seekTo(0); p.start(); }
+        if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) {
+          p.seekTo(0);
+          p.start();
+          itemDesde = android.os.SystemClock.elapsedRealtime();
+        }
         else proximo();
       });
       este.setOnErrorListener((p, a, b) -> { ui.postDelayed(this::proximo, 1000); return true; });
@@ -423,6 +441,8 @@ public class Player extends Activity {
         return false;
       });
       este.setOnPreparedListener(p -> {
+        if (p.getDuration() > 0) duracoes.put(it.id, (long) p.getDuration());
+        itemDesde = android.os.SystemClock.elapsedRealtime();
         ajustarVideo();
         video.setVisibility(View.VISIBLE);
         p.start();

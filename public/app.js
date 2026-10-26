@@ -62,6 +62,26 @@ $("sair").addEventListener("click", async () => {
 
 const online = (t) => t.status && Date.now() - t.status.em < 90000;
 
+/**
+ * O que está no ar agora. A TV avisa a cada 30 s qual item tocava, há quanto tempo e a
+ * sequência com a duração de cada item; daqui a conta anda sozinha segundo a segundo.
+ */
+function noAr(t) {
+  const s = t && t.status;
+  if (!s || !online(t)) return null;
+  const seq = s.seq || [];
+  let i = seq.findIndex((x) => x[0] === s.item);
+  if (i < 0) return { id: s.item, ms: 0 };
+  let ms = Date.now() - s.em + (s.decorrido || 0);
+  for (let volta = 0; volta < 2000; volta++) {
+    const dur = seq[i][1];
+    if (!dur || ms < dur || seq.length === 1) return { id: seq[i][0], ms: seq.length === 1 && dur ? ms % dur : ms };
+    ms -= dur;
+    i = (i + 1) % seq.length;
+  }
+  return { id: seq[i][0], ms: 0 };
+}
+
 async function carregarTvs() {
   try { tvs = await api("/api/tvs"); } catch { return; }
   if (!tvs.find((t) => t.id === atual)) {
@@ -115,9 +135,9 @@ function desenharStatus() {
   } else {
     const seg = Math.round((Date.now() - s.em) / 1000);
     const quando = seg < 60 ? `há ${seg} s` : seg < 3600 ? `há ${Math.round(seg / 60)} min` : "há mais de 1 h";
-    const item = playlist.itens.find((i) => i.id === s.item);
     const partes = [];
-    if (online(tv)) partes.push(item ? `No ar: <strong>${escapar(item.nome)}</strong>` : "<strong>TV ligada</strong>, nada no ar");
+    const agora = noAr(tv), itemAgora = agora && playlist.itens.find((i) => i.id === agora.id);
+    if (online(tv)) partes.push(itemAgora ? `No ar: <strong data-noar>${escapar(itemAgora.nome)}</strong>` : "<strong>TV ligada</strong>, nada no ar");
     else partes.push(`<strong>Offline</strong>`);
     partes.push(`último sinal ${quando}`);
     if (s.versao && s.versao < playlist.versao) partes.push("atualizando a playlist…");
@@ -126,13 +146,24 @@ function desenharStatus() {
     if (s.app) partes.push(`app ${escapar(s.app)}`);
     el.innerHTML = partes.map((p) => `<span>${p}</span>`).join("");
   }
-  // marca na lista o que está no ar de verdade
-  document.querySelectorAll(".item").forEach((li) => {
-    const noAr = online(tv) && s && playlist.itens[li.dataset.idx]?.id === s.item;
-    li.classList.toggle("no-ar", !!noAr);
-    li.querySelector(".tag.ar")?.toggleAttribute("hidden", !noAr);
-  });
+  marcarNoAr();
 }
+
+/** Marca na lista o item no ar e faz a prévia mostrar o mesmo que a TV. Roda a cada segundo. */
+function marcarNoAr() {
+  const tv = tvs.find((t) => t.id === atual);
+  const agora = noAr(tv);
+  document.querySelectorAll(".item").forEach((li) => {
+    const sim = !!agora && playlist.itens[li.dataset.idx]?.id === agora.id;
+    li.classList.toggle("no-ar", sim);
+    li.querySelector(".tag.ar")?.toggleAttribute("hidden", !sim);
+  });
+  const item = agora && playlist.itens.find((i) => i.id === agora.id);
+  const txt = document.querySelector("#status-texto span strong");
+  if (item && txt && txt.dataset.noar !== undefined) txt.textContent = item.nome;
+  if (item && item.ativo) seguirTv(item, agora.ms);
+}
+setInterval(marcarNoAr, 1000);
 
 // adicionar TV
 for (const b of [$("adicionar-tv"), $("adicionar-tv-2")]) {
@@ -389,19 +420,29 @@ async function enviar(arquivos) {
 
 // ---------------- prévia (mesma ordem e tempos da TV, sem som) ----------------
 
-let previaPos = -1, previaTimer = null, relogio = null, inicioItem = 0;
+let previaPos = -1, previaTimer = null, relogio = null, inicioItem = 0, previaId = null;
+
+/** TV online: a prévia mostra o mesmo item que a TV, no mesmo ponto. */
+function seguirTv(it, ms) {
+  if (previaId === it.id) return;
+  const ativos = playlist.itens.filter((i) => i.ativo);
+  previaPos = ativos.findIndex((i) => i.id === it.id) - 1;
+  proximaPrevia(ms);
+}
 
 function reiniciarPrevia() {
   clearTimeout(previaTimer);
   previaPos = -1;
+  previaId = null;
   proximaPrevia();
 }
 
-function proximaPrevia() {
+function proximaPrevia(desde = 0) {
   clearTimeout(previaTimer);
   const tela = $("previa");
   const ativos = playlist.itens.filter((i) => i.ativo);
   if (!ativos.length) {
+    previaId = null;
     tela.innerHTML = '<div class="vazio">Nada no ar</div>';
     $("previa-nome").textContent = "—";
     $("previa-pos").textContent = "";
@@ -410,13 +451,15 @@ function proximaPrevia() {
   }
   previaPos = (previaPos + 1) % ativos.length;
   const it = ativos[previaPos];
+  previaId = it.id;
   $("previa-nome").textContent = it.nome;
   $("previa-pos").textContent = `${previaPos + 1}/${ativos.length}`;
-  inicioItem = Date.now();
+  inicioItem = Date.now() - desde;
   if (it.tipo === "video") {
     const v = document.createElement("video");
     v.src = it.url; v.muted = true; v.autoplay = true; v.playsInline = true;
-    v.onended = proximaPrevia;
+    if (desde) v.addEventListener("loadedmetadata", () => { v.currentTime = Math.min(desde / 1000, Math.max(0, v.duration - 0.5)); }, { once: true });
+    v.onended = () => proximaPrevia();
     v.onerror = () => { previaTimer = setTimeout(proximaPrevia, 2000); };
     if (ativos.length === 1) v.loop = true;
     tela.replaceChildren(v);
@@ -424,7 +467,7 @@ function proximaPrevia() {
     const img = new Image();
     img.src = it.url; img.alt = "";
     tela.replaceChildren(img);
-    previaTimer = setTimeout(proximaPrevia, it.duracao * 1000);
+    previaTimer = setTimeout(proximaPrevia, Math.max(500, it.duracao * 1000 - desde));
   }
 }
 

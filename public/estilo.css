@@ -31,10 +31,11 @@ code { font: 500 13px ui-monospace, "SF Mono", Menlo, Consolas, monospace; backg
 
 /* vidro */
 .cartao, .monitor, .janela, .topo-vidro {
-  background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.045));
+  /* vidro sem backdrop-filter: o desfoque do navegador deixava uma faixa clara fixa dentro dos
+     cartões. Aqui o "vidro" é translucidez + brilho na borda de cima, que dá o mesmo efeito. */
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05) 40%, rgba(255,255,255,.035));
   border: 1px solid var(--borda);
   box-shadow: inset 0 1px 0 var(--brilho), 0 20px 50px rgba(0,0,0,.35);
-  backdrop-filter: blur(30px) saturate(160%); -webkit-backdrop-filter: blur(30px) saturate(160%);
   border-radius: var(--raio);
 }
 .rotulo { font-size: 12px; font-weight: 600; color: var(--suave); display: inline-flex; align-items: center; gap: 8px; }
@@ -75,9 +76,8 @@ input[type=checkbox] { accent-color: var(--azul); }
 .topo {
   display: flex; align-items: center; gap: 14px; padding: 12px 20px; margin: 14px 20px 0; flex-wrap: wrap;
   position: sticky; top: 12px; z-index: 5;
-  background: rgba(30,30,36,.55); border: 1px solid var(--borda); border-radius: 999px;
+  background: rgba(24,24,30,.82); border: 1px solid var(--borda); border-radius: 999px;
   box-shadow: inset 0 1px 0 var(--brilho), 0 12px 30px rgba(0,0,0,.35);
-  backdrop-filter: blur(30px) saturate(160%); -webkit-backdrop-filter: blur(30px) saturate(160%);
 }
 .topo .logo { height: 30px; margin-left: 4px; }
 .marca { display: flex; flex-direction: column; line-height: 1.15; padding-right: 6px; }
@@ -186,7 +186,7 @@ ol { list-style: none; margin: 0; padding: 0; counter-reset: n; }
 }
 
 /* janelas */
-.janela { color: var(--texto); padding: 26px; width: min(440px, calc(100vw - 32px)); border-radius: 26px; background: rgba(36,36,42,.72); }
+.janela { color: var(--texto); padding: 26px; width: min(440px, calc(100vw - 32px)); border-radius: 26px; background: rgba(30,30,36,.96); }
 .janela::backdrop { background: rgba(0,0,0,.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .janela form { display: flex; flex-direction: column; gap: 12px; }
 .janela p { margin: 0; }
