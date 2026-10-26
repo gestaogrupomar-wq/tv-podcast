@@ -89,7 +89,7 @@ public class Player extends Activity {
     video.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
       @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
         superficie = new Surface(st);
-        if (atual != null && atual.video()) tocarVideo(atual, midia.prontos().size() == 1);
+        if (atual != null && atual.video()) tocarVideo(atual);
       }
       @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
       @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
@@ -364,7 +364,7 @@ public class Player extends Activity {
     if (atual.video()) {
       fotoA.animate().alpha(0f).setDuration(FADE).start();
       fotoB.animate().alpha(0f).setDuration(FADE).start();
-      tocarVideo(atual, lista.size() == 1);
+      tocarVideo(atual);
     } else {
       Bitmap bmp = abrirFoto(atual);
       if (bmp == null) { ui.postDelayed(this::proximo, 500); return; }
@@ -383,18 +383,23 @@ public class Player extends Activity {
   }
 
   /** Vídeo num TextureView (que gira junto com o palco, ao contrário do VideoView). */
-  private void tocarVideo(Midia.Item it, boolean sozinho) {
+  private void tocarVideo(Midia.Item it) {
     if (superficie == null) { video.setVisibility(View.VISIBLE); return; } // toca quando a superfície existir
     pararVideo();
     try {
       mp = new MediaPlayer();
       mp.setSurface(superficie);
       mp.setDataSource(it.arquivo.getAbsolutePath());
-      mp.setLooping(sozinho);
       float v = it.som ? 1f : 0f;
       mp.setVolume(v, v);
       mp.setOnVideoSizeChangedListener((p, w, h) -> ajustarVideo());
-      mp.setOnCompletionListener(p -> proximo());
+      // sem setLooping: no fim de cada vídeo a playlist é conferida de novo (fotos podem ter
+      // terminado de baixar). Se o vídeo continua sendo o único item, recomeça sem tela preta.
+      mp.setOnCompletionListener(p -> {
+        List<Midia.Item> prontos = midia.prontos();
+        if (prontos.size() == 1 && prontos.get(0).id.equals(it.id)) { p.seekTo(0); p.start(); }
+        else proximo();
+      });
       mp.setOnErrorListener((p, a, b) -> { ui.postDelayed(this::proximo, 1000); return true; });
       mp.setOnPreparedListener(p -> { ajustarVideo(); video.setVisibility(View.VISIBLE); p.start(); });
       mp.prepareAsync();
